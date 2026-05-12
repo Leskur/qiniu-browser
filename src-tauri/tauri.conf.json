@@ -46,7 +46,7 @@
       "endpoints": [
         "https://github.com/Leskur/qiniu-browser/releases/latest/download/latest.json"
       ],
-      "active": true
+      "active": false
     }
   }
 }
