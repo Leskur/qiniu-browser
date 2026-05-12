@@ -286,6 +286,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![greet, get_histories, get_kodo_histories, save_history, delete_history, upload_files, download_file, download_files_to_dir])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

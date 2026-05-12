@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
+import { check } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/api/process';
 import { Login } from "./components/Login";
 import { FileManager } from "./components/FileManager";
 import { BucketList } from "./components/BucketList";
@@ -95,6 +97,39 @@ function App() {
   useEffect(() => {
     if (isAuthenticated) loadBuckets();
   }, [isAuthenticated]);
+
+  // 检查更新
+  useEffect(() => {
+    async function checkForUpdates() {
+      try {
+        const update = await check();
+        if (update?.available) {
+          toast.info(`发现新版本 ${update.version}`, {
+            description: '是否立即更新？',
+            action: {
+              label: '立即更新',
+              onClick: async () => {
+                try {
+                  toast.loading('正在下载更新...');
+                  await update.downloadAndInstall();
+                  await relaunch();
+                } catch (error) {
+                  toast.error('更新失败', {
+                    description: error instanceof Error ? error.message : '未知错误'
+                  });
+                }
+              }
+            },
+            duration: 10000,
+          });
+        }
+      } catch (error) {
+        console.error('检查更新失败:', error);
+      }
+    }
+    
+    checkForUpdates();
+  }, []);
 
   const handleLogout = () => {
     setIsAuthenticated(false);

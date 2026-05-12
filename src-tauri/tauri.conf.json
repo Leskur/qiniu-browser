@@ -23,8 +23,16 @@
       "csp": null
     }
   },
-  "plugins": {},
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE1M0NEODdBQ0M1QUVGNjMKUldSajcxck1ldGc4cFhqSUwvVVl2Q1hoQ21vQVV1b0RmQ3VBeXM4Q2duek9haEtKOFAvajJGOEQK",
+      "endpoints": [
+        "https://github.com/Leskur/qiniu-browser/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
+    "active": true,
     "targets": [
       "nsis",
       "msi",
@@ -38,7 +46,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "active": true
+    ]
   }
 }
