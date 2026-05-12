@@ -1,5 +1,5 @@
 [package]
-name = "tauri-app"
+name = "qiniu-browser"
 version = "0.0.1"
 description = "A Tauri App"
 authors = ["you"]
