@@ -194,11 +194,10 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                     const isLoading = loggingInKey === item.accessKey;
                     const displayLabel = item.accessKey.substring(0, 16) + "...";
                     return (
-                      <button
+                      <div
                         key={item.accessKey}
-                        onClick={() => handleSelectHistory(item)}
-                        disabled={loggingInKey !== null}
-                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:border-emerald-400 dark:hover:border-emerald-600 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 transition-all group disabled:opacity-60 disabled:pointer-events-none text-left"
+                        onClick={() => !isLoading && loggingInKey === null && handleSelectHistory(item)}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:border-emerald-400 dark:hover:border-emerald-600 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 transition-all group text-left cursor-pointer ${loggingInKey !== null ? 'opacity-60 pointer-events-none' : ''}`}
                       >
                         {/* Avatar */}
                         <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white font-bold text-sm shrink-0">
@@ -232,7 +231,7 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                             <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600 group-hover:text-emerald-500 transition-colors" />
                           </div>
                         )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

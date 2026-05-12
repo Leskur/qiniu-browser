@@ -8,6 +8,9 @@
     "opener:default",
     "http:default",
     "dialog:default",
+    "updater:default",
+    "updater:allow-check",
+    "process:default",
     {
       "identifier": "http:default",
       "allow": [
