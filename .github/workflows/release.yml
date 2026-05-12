@@ -58,6 +58,7 @@ jobs:
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ${{ matrix.platform == 'macos-latest' && '--target aarch64-apple-darwin --bundles app,dmg' || matrix.args }}
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+          updaterJsonKeepUniversal: false
