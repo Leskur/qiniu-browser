@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "qiniu-browser",
+  "productName": "Qiniu Browser",
   "version": "0.0.1",
   "identifier": "com.leskur.qiniu-browser",
   "build": {
