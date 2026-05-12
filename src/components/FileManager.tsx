@@ -6,7 +6,8 @@ import { Skeleton } from "./ui/skeleton";
 import {
   File, Image, Film, FileText, Archive,
   Link2, Check, RefreshCw, Trash2, Upload, FolderOpen,
-  Folder, ChevronRight, AlertCircle, Database, Download, X, Square, CheckSquare, ArrowUpDown, ArrowUp, ArrowDown, Pencil, ArrowLeft, ArrowRight
+  Folder, ChevronRight, AlertCircle, Database, Download, X, Square, CheckSquare, ArrowUpDown, ArrowUp, ArrowDown, Pencil, ArrowLeft, ArrowRight,
+  HardDrive, FileBox
 } from "lucide-react";
 import { toast } from "sonner";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -14,6 +15,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { FolderUploadDialog } from "./FolderUploadDialog";
 import { useTransferStore } from "../store/transfer";
+import { useAppStore } from "../store";
 
 export function formatBytes(bytes: number, decimals = 2) {
   if (!+bytes) return '0 Bytes'
@@ -85,6 +87,10 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   
   // Transfer store
   const { addTask, updateTask, setPanelOpen } = useTransferStore();
+
+  // Bucket stats from global store
+  const { buckets } = useAppStore();
+  const bucketInfo = buckets.find(b => b.tbl === bucket);
   
   // Folder upload dialog
   const [folderUploadPath, setFolderUploadPath] = useState<string | null>(null);
@@ -756,7 +762,19 @@ export function FileManager({ ak, sk, bucket, onBack }: {
           </div>
         ) : (
         <div className="flex items-center gap-2 shrink-0 ml-2">
-          {!loading && (
+          {!loading && bucketInfo && (
+            <div className="hidden md:flex items-center gap-3 text-xs text-zinc-400 dark:text-zinc-500 tabular-nums mr-1">
+              <span className="flex items-center gap-1">
+                <FileBox className="w-3.5 h-3.5 text-zinc-400" />
+                {bucketInfo.file_num.toLocaleString()} 个文件
+              </span>
+              <span className="flex items-center gap-1">
+                <HardDrive className="w-3.5 h-3.5 text-zinc-400" />
+                {formatBytes(bucketInfo.storage_size)}
+              </span>
+            </div>
+          )}
+          {!loading && !bucketInfo && (
             <span className="text-xs text-zinc-400 hidden md:block tabular-nums">
               {items.length} 项
             </span>
