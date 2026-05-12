@@ -12,6 +12,8 @@ import { toast } from "sonner";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { FolderUploadDialog } from "./FolderUploadDialog";
+import { useTransferStore } from "../store/transfer";
 
 export function formatBytes(bytes: number, decimals = 2) {
   if (!+bytes) return '0 Bytes'
@@ -80,6 +82,12 @@ export function FileManager({ ak, sk, bucket, onBack }: {
 }) {
   const [domains, setDomains] = useState<string[]>([]);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  
+  // Transfer store
+  const { addTask, updateTask, setPanelOpen } = useTransferStore();
+  
+  // Folder upload dialog
+  const [folderUploadPath, setFolderUploadPath] = useState<string | null>(null);
 
   // ── Virtual folder navigation + history ──
   const [currentPrefix, setCurrentPrefix] = useState("");
@@ -170,6 +178,90 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   // ── Upload state ──
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  
+  // ── Listen to upload/download progress events ──
+  useEffect(() => {
+    const taskMap = new Map<string, string>(); // backend task_id -> frontend task id
+    
+    const unlistenUpload = listen<{
+      task_id: string;
+      file_name: string;
+      file_path: string;
+      total_size: number;
+      uploaded_size: number;
+      progress: number;
+      status: string;
+      error?: string;
+    }>('upload-progress', (event) => {
+      const { task_id, file_name, total_size, uploaded_size, progress, status, error } = event.payload;
+      console.log('[upload-progress]', { task_id, file_name, status, progress, uploaded_size, total_size });
+      
+      if (!taskMap.has(task_id)) {
+        // New upload task
+        const frontendId = addTask({
+          type: 'upload',
+          fileName: file_name,
+          totalSize: total_size,
+        });
+        console.log('[upload-progress] created task', { backendId: task_id, frontendId });
+        taskMap.set(task_id, frontendId);
+      }
+      
+      const frontendId = taskMap.get(task_id);
+      if (frontendId) {
+        console.log('[upload-progress] updating task', { frontendId, status, progress });
+        updateTask(frontendId, {
+          transferredSize: uploaded_size,
+          progress,
+          status: status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : 'transferring',
+          error,
+          endTime: status === 'completed' || status === 'failed' ? Date.now() : undefined,
+        });
+      }
+    });
+    
+    const unlistenDownload = listen<{
+      task_id: string;
+      file_name: string;
+      url: string;
+      total_size: number;
+      downloaded_size: number;
+      progress: number;
+      status: string;
+      error?: string;
+    }>('download-progress', (event) => {
+      const { task_id, file_name, total_size, downloaded_size, progress, status, error } = event.payload;
+      console.log('[download-progress]', { task_id, file_name, status, progress, downloaded_size, total_size });
+      
+      if (!taskMap.has(task_id)) {
+        // New download task
+        const frontendId = addTask({
+          type: 'download',
+          fileName: file_name,
+          totalSize: total_size,
+        });
+        console.log('[download-progress] created task', { backendId: task_id, frontendId });
+        taskMap.set(task_id, frontendId);
+      }
+      
+      const frontendId = taskMap.get(task_id);
+      if (frontendId) {
+        console.log('[download-progress] updating task', { frontendId, status, progress });
+        updateTask(frontendId, {
+          transferredSize: downloaded_size,
+          progress,
+          status: status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : 'transferring',
+          error,
+          endTime: status === 'completed' || status === 'failed' ? Date.now() : undefined,
+        });
+      }
+    });
+    
+    return () => {
+      unlistenUpload.then(f => f());
+      unlistenDownload.then(f => f());
+    };
+  }, [addTask, updateTask]);
 
   // ── Batch selection ──
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -255,18 +347,17 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   const handleUploadPaths = async (paths: string[]) => {
     if (paths.length === 0) return;
     setIsUploading(true);
-    const tid = toast.loading(`正在上传 ${paths.length} 个文件...`, { duration: Infinity });
+    setPanelOpen(true); // Open transfer panel
+    
     try {
       const result: { uploaded: string[]; failed: string[] } = await invoke('upload_files', { ak, sk, bucket, filePaths: paths });
-      toast.dismiss(tid);
-      if (result.failed.length === 0) {
-        toast.success('上传完成', { description: `成功上传 ${result.uploaded.length} 个文件` });
-      } else {
-        toast.warning('上传部分完成', { description: `成功 ${result.uploaded.length} 个，失败 ${result.failed.length} 个` });
+      
+      // Only show toast for failures, progress panel shows success
+      if (result.failed.length > 0) {
+        toast.warning('部分文件上传失败', { description: `成功 ${result.uploaded.length} 个，失败 ${result.failed.length} 个` });
       }
       loadDirectory(currentPrefix, true);
     } catch (err: any) {
-      toast.dismiss(tid);
       toast.error('上传失败', { description: String(err) });
     } finally {
       setIsUploading(false);
@@ -386,23 +477,69 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     if (domains.length === 0) { toast.warning('此存储空间未绑定外链域名，无法下载'); return; }
     const dir = await open({ directory: true, title: '选择保存目录' });
     if (!dir || Array.isArray(dir)) return;
+    
+    setPanelOpen(true); // Open transfer panel
+    
     const batchItems: [string, string][] = keys.map(key => [
       generateDownloadUrl(ak, sk, domains[0], key),
       key.split('/').pop() || key,
     ]);
-    const tid = toast.loading(`正在下载 ${keys.length} 个文件...`, { duration: Infinity });
+    
     try {
       const result: { downloaded: string[]; failed: string[] } = await invoke('download_files_to_dir', { items: batchItems, dir });
-      toast.dismiss(tid);
-      if (result.failed.length === 0) {
-        toast.success(`已下载 ${result.downloaded.length} 个文件`);
-      } else {
-        toast.warning(`下载部分完成`, { description: `成功 ${result.downloaded.length} 个，失败 ${result.failed.length} 个` });
+      
+      // Only show toast for failures, progress panel shows success
+      if (result.failed.length > 0) {
+        toast.warning(`部分文件下载失败`, { description: `成功 ${result.downloaded.length} 个，失败 ${result.failed.length} 个` });
       }
       setSelectedKeys(new Set());
     } catch (err: any) {
-      toast.dismiss(tid);
       toast.error('批量下载失败', { description: String(err) });
+    }
+  };
+  
+  const handleDownloadFolder = async (folderPrefix: string) => {
+    if (domains.length === 0) { toast.warning('此存储空间未绑定外链域名，无法下载'); return; }
+    
+    const dir = await open({ directory: true, title: '选择保存目录' });
+    if (!dir || Array.isArray(dir)) return;
+    
+    setPanelOpen(true);
+    
+    try {
+      // Fetch all files in the folder
+      const res = await fetchFiles(ak, sk, bucket, folderPrefix, "", 10000);
+      const folderFiles = res.items || [];
+      
+      if (folderFiles.length === 0) {
+        toast.info('文件夹为空');
+        return;
+      }
+      
+      // Get folder name from prefix (remove trailing slash)
+      const folderName = folderPrefix.slice(0, -1).split('/').pop() || 'folder';
+      
+      // Create download items with folder name + relative paths
+      // Filter out items that end with '/' (they are folders, not files)
+      const batchItems: [string, string][] = folderFiles
+        .filter(file => !file.key.endsWith('/'))
+        .map(file => [
+          generateDownloadUrl(ak, sk, domains[0], file.key),
+          folderName + '/' + file.key.slice(folderPrefix.length), // Add folder name prefix
+        ]);
+      
+      if (batchItems.length === 0) {
+        toast.info('文件夹中没有文件');
+        return;
+      }
+      
+      const result: { downloaded: string[]; failed: string[] } = await invoke('download_files_to_dir', { items: batchItems, dir });
+      
+      if (result.failed.length > 0) {
+        toast.warning(`部分文件下载失败`, { description: `成功 ${result.downloaded.length} 个，失败 ${result.failed.length} 个` });
+      }
+    } catch (err: any) {
+      toast.error('下载文件夹失败', { description: String(err) });
     }
   };
 
@@ -443,9 +580,23 @@ export function FileManager({ ak, sk, bucket, onBack }: {
       });
       if (!selected) return;
       const paths: string[] = Array.isArray(selected) ? selected : [selected];
-      if (paths.length > 0) handleUploadPaths(paths);
+      
+      if (directory && paths.length > 0) {
+        // Show folder upload dialog
+        setFolderUploadPath(paths[0]);
+      } else if (paths.length > 0) {
+        // Direct upload for files
+        handleUploadPaths(paths);
+      }
     } catch (err: any) {
       toast.error("打开文件对话框失败", { description: err.message });
+    }
+  };
+  
+  const handleFolderUploadConfirm = (selectedFiles: string[]) => {
+    setFolderUploadPath(null);
+    if (selectedFiles.length > 0) {
+      handleUploadPaths(selectedFiles);
     }
   };
 
@@ -733,14 +884,24 @@ export function FileManager({ ak, sk, bucket, onBack }: {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                handleDownloadFolder(entry.prefix);
+                              }}
+                              className="p-1.5 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded"
+                              title="下载整个文件夹"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setDirToDelete(entry.prefix);
                               }}
-                              className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded mr-2"
+                              className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
                               title="删除整个目录"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
-                            <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600" />
+                            <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600 ml-1" />
                           </div>
                         </TableCell>
                       </TableRow>
@@ -997,6 +1158,15 @@ export function FileManager({ ak, sk, bucket, onBack }: {
             </div>
           </div>
         </div>
+      )}
+      
+      {/* Folder Upload Dialog */}
+      {folderUploadPath && (
+        <FolderUploadDialog
+          folderPath={folderUploadPath}
+          onConfirm={handleFolderUploadConfirm}
+          onCancel={() => setFolderUploadPath(null)}
+        />
       )}
     </div>
   );

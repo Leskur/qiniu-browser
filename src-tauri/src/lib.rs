@@ -140,7 +140,8 @@ use qiniu_sdk::credential::Credential;
 use qiniu_sdk::upload::{UploadManager, UploadTokenSigner, AutoUploaderObjectParams, AutoUploader};
 use std::time::Duration;
 use rayon::prelude::*;
-use std::sync::Mutex;
+use std::sync::{Mutex, Arc};
+use tauri::{Emitter, AppHandle};
 
 
 fn collect_files(paths: Vec<String>) -> Vec<(PathBuf, String)> {
@@ -176,6 +177,30 @@ fn collect_files(paths: Vec<String>) -> Vec<(PathBuf, String)> {
     result
 }
 
+#[derive(serde::Serialize, Clone)]
+struct UploadProgressEvent {
+    task_id: String,
+    file_name: String,
+    file_path: String,
+    total_size: u64,
+    uploaded_size: u64,
+    progress: f64,
+    status: String, // "uploading", "completed", "failed"
+    error: Option<String>,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct DownloadProgressEvent {
+    task_id: String,
+    file_name: String,
+    url: String,
+    total_size: u64,
+    downloaded_size: u64,
+    progress: f64,
+    status: String, // "downloading", "completed", "failed"
+    error: Option<String>,
+}
+
 #[derive(serde::Serialize)]
 struct UploadResult {
     uploaded: Vec<String>,
@@ -184,11 +209,13 @@ struct UploadResult {
 
 #[tauri::command]
 async fn upload_files(
+    app: AppHandle,
     ak: String,
     sk: String,
     bucket: String,
     file_paths: Vec<String>,
 ) -> Result<UploadResult, String> {
+    let app_clone = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let upload_manager = UploadManager::builder(
             UploadTokenSigner::new_credential_provider(
@@ -203,13 +230,60 @@ async fn upload_files(
         let failed: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
         files.par_iter().for_each(|(path, key)| {
+            let task_id = uuid::Uuid::new_v4().to_string();
+            let file_name = key.clone();
+            let file_path = path.to_string_lossy().to_string();
+            
+            // Get file size
+            let total_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            
+            // Emit start event
+            let _ = app_clone.emit("upload-progress", UploadProgressEvent {
+                task_id: task_id.clone(),
+                file_name: file_name.clone(),
+                file_path: file_path.clone(),
+                total_size,
+                uploaded_size: 0,
+                progress: 0.0,
+                status: "uploading".to_string(),
+                error: None,
+            });
+
             let auto_uploader: AutoUploader<md5::Md5> = upload_manager.auto_uploader();
             let auto_params = AutoUploaderObjectParams::builder()
                 .object_name(key.clone())
                 .build();
+            
             match auto_uploader.upload_path(path, auto_params) {
-                Ok(_) => uploaded.lock().unwrap().push(key.clone()),
-                Err(e) => failed.lock().unwrap().push(format!("{}: {}", key, e)),
+                Ok(_) => {
+                    uploaded.lock().unwrap().push(key.clone());
+                    // Emit success event
+                    let _ = app_clone.emit("upload-progress", UploadProgressEvent {
+                        task_id,
+                        file_name,
+                        file_path,
+                        total_size,
+                        uploaded_size: total_size,
+                        progress: 100.0,
+                        status: "completed".to_string(),
+                        error: None,
+                    });
+                },
+                Err(e) => {
+                    let error_msg = format!("{}: {}", key, e);
+                    failed.lock().unwrap().push(error_msg.clone());
+                    // Emit error event
+                    let _ = app_clone.emit("upload-progress", UploadProgressEvent {
+                        task_id,
+                        file_name,
+                        file_path,
+                        total_size,
+                        uploaded_size: 0,
+                        progress: 0.0,
+                        status: "failed".to_string(),
+                        error: Some(error_msg),
+                    });
+                },
             }
         });
 
@@ -228,6 +302,7 @@ struct DownloadResult {
 
 #[tauri::command]
 async fn download_files_to_dir(
+    app: AppHandle,
     items: Vec<(String, String)>, // (url, filename)
     dir: String,
 ) -> Result<DownloadResult, String> {
@@ -240,19 +315,123 @@ async fn download_files_to_dir(
         let save_path = dir_path.join(&filename);
         let dl = Arc::clone(&downloaded);
         let fl = Arc::clone(&failed);
+        let app_clone = app.clone();
+        let task_id = uuid::Uuid::new_v4().to_string();
+        
         tokio::spawn(async move {
+            // Emit start event
+            let _ = app_clone.emit("download-progress", DownloadProgressEvent {
+                task_id: task_id.clone(),
+                file_name: filename.clone(),
+                url: url.clone(),
+                total_size: 0,
+                downloaded_size: 0,
+                progress: 0.0,
+                status: "downloading".to_string(),
+                error: None,
+            });
+            
             match reqwest::get(&url).await {
                 Ok(resp) if resp.status().is_success() => {
+                    let total_size = resp.content_length().unwrap_or(0);
                     match resp.bytes().await {
-                        Ok(bytes) => match fs::write(&save_path, &bytes) {
-                            Ok(_) => dl.lock().unwrap().push(filename),
-                            Err(e) => fl.lock().unwrap().push(format!("{}: {}", filename, e)),
+                        Ok(bytes) => {
+                            let downloaded_size = bytes.len() as u64;
+                            
+                            // Create parent directories if they don't exist
+                            if let Some(parent) = save_path.parent() {
+                                if let Err(e) = fs::create_dir_all(parent) {
+                                    let error_msg = format!("{}: {}", filename, e);
+                                    fl.lock().unwrap().push(error_msg.clone());
+                                    let _ = app_clone.emit("download-progress", DownloadProgressEvent {
+                                        task_id,
+                                        file_name: filename,
+                                        url,
+                                        total_size,
+                                        downloaded_size: 0,
+                                        progress: 0.0,
+                                        status: "failed".to_string(),
+                                        error: Some(error_msg),
+                                    });
+                                    return;
+                                }
+                            }
+                            
+                            match fs::write(&save_path, &bytes) {
+                                Ok(_) => {
+                                    dl.lock().unwrap().push(filename.clone());
+                                    // Emit success event
+                                    let _ = app_clone.emit("download-progress", DownloadProgressEvent {
+                                        task_id,
+                                        file_name: filename,
+                                        url,
+                                        total_size,
+                                        downloaded_size,
+                                        progress: 100.0,
+                                        status: "completed".to_string(),
+                                        error: None,
+                                    });
+                                },
+                                Err(e) => {
+                                    let error_msg = format!("{}: {}", filename, e);
+                                    fl.lock().unwrap().push(error_msg.clone());
+                                    let _ = app_clone.emit("download-progress", DownloadProgressEvent {
+                                        task_id,
+                                        file_name: filename,
+                                        url,
+                                        total_size,
+                                        downloaded_size: 0,
+                                        progress: 0.0,
+                                        status: "failed".to_string(),
+                                        error: Some(error_msg),
+                                    });
+                                },
+                            }
                         },
-                        Err(e) => fl.lock().unwrap().push(format!("{}: {}", filename, e)),
+                        Err(e) => {
+                            let error_msg = format!("{}: {}", filename, e);
+                            fl.lock().unwrap().push(error_msg.clone());
+                            let _ = app_clone.emit("download-progress", DownloadProgressEvent {
+                                task_id,
+                                file_name: filename,
+                                url,
+                                total_size,
+                                downloaded_size: 0,
+                                progress: 0.0,
+                                status: "failed".to_string(),
+                                error: Some(error_msg),
+                            });
+                        },
                     }
                 }
-                Ok(resp) => fl.lock().unwrap().push(format!("{}: HTTP {}", filename, resp.status())),
-                Err(e) => fl.lock().unwrap().push(format!("{}: {}", filename, e)),
+                Ok(resp) => {
+                    let error_msg = format!("{}: HTTP {}", filename, resp.status());
+                    fl.lock().unwrap().push(error_msg.clone());
+                    let _ = app_clone.emit("download-progress", DownloadProgressEvent {
+                        task_id,
+                        file_name: filename,
+                        url,
+                        total_size: 0,
+                        downloaded_size: 0,
+                        progress: 0.0,
+                        status: "failed".to_string(),
+                        error: Some(error_msg),
+                    });
+                },
+                Err(e) => {
+                    let error_msg = format!("{}: {}", filename, e);
+                    fl.lock().unwrap().push(error_msg.clone());
+                    let _ = app_clone.emit("download-progress", DownloadProgressEvent {
+                        task_id,
+                        file_name: filename,
+                        url,
+                        total_size: 0,
+                        downloaded_size: 0,
+                        progress: 0.0,
+                        status: "failed".to_string(),
+                        error: Some(error_msg),
+                    });
+                },
             }
         })
     }).collect();
@@ -280,6 +459,70 @@ async fn download_file(url: String, save_path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+struct FileInfo {
+    path: String,
+    name: String,
+    size: u64,
+    relative_path: String,
+}
+
+#[derive(serde::Serialize)]
+struct ScanFolderResult {
+    files: Vec<FileInfo>,
+    total_size: u64,
+    total_count: usize,
+}
+
+#[tauri::command]
+fn scan_folder(folder_path: String) -> Result<ScanFolderResult, String> {
+    let base_path = PathBuf::from(&folder_path);
+    if !base_path.is_dir() {
+        return Err("Not a directory".to_string());
+    }
+    
+    let mut files = Vec::new();
+    let mut total_size = 0u64;
+    
+    let walker = walkdir::WalkDir::new(&base_path).into_iter().filter_map(|e| e.ok());
+    for entry in walker {
+        if entry.file_type().is_file() {
+            let file_path = entry.path().to_path_buf();
+            let size = std::fs::metadata(&file_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
+            
+            let relative_path = file_path
+                .strip_prefix(base_path.parent().unwrap_or(&base_path))
+                .unwrap_or(&file_path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            
+            let name = file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            
+            total_size += size;
+            files.push(FileInfo {
+                path: file_path.to_string_lossy().to_string(),
+                name,
+                size,
+                relative_path,
+            });
+        }
+    }
+    
+    let total_count = files.len();
+    
+    Ok(ScanFolderResult {
+        files,
+        total_size,
+        total_count,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -288,7 +531,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![greet, get_histories, get_kodo_histories, save_history, delete_history, upload_files, download_file, download_files_to_dir])
+        .invoke_handler(tauri::generate_handler![greet, get_histories, get_kodo_histories, save_history, delete_history, upload_files, download_file, download_files_to_dir, scan_folder])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

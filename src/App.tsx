@@ -6,6 +6,7 @@ import { Login } from "./components/Login";
 import { FileManager } from "./components/FileManager";
 import { BucketList } from "./components/BucketList";
 import { CdnManager } from "./components/CdnManager";
+import { TransferPanel } from "./components/TransferPanel";
 import { fetchBuckets } from "./lib/qiniu";
 import { useAppStore, Theme } from "./store";
 import {
@@ -338,6 +339,9 @@ function App() {
           </div>
         </div>
       )}
+      
+      {/* Transfer Panel - Global */}
+      {isAuthenticated && <TransferPanel />}
     </main>
   );
 }
