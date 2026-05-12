@@ -129,14 +129,11 @@ export function FileManager({ ak, sk, bucket, onBack }: {
 
   // ── Per-directory data state ──
   const [items, setItems]       = useState<QiniuFile[]>([]);
-  const [marker, setMarker]     = useState<string>("");
-  const [hasMore, setHasMore]   = useState(false);
   const [loading, setLoading]   = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError]       = useState("");
 
   // ── Directory cache ──
-  const dirCache = useRef<Map<string, { items: QiniuFile[]; marker: string; hasMore: boolean }>>(new Map());
+  const dirCache = useRef<Map<string, { items: QiniuFile[] }>>(new Map());
 
   // ── Detail modal state ──
   const [selectedFile, setSelectedFile] = useState<QiniuFile | null>(null);
@@ -308,8 +305,6 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     if (!forceRefresh && dirCache.current.has(prefix)) {
       const cached = dirCache.current.get(prefix)!;
       setItems(cached.items);
-      setMarker(cached.marker);
-      setHasMore(cached.hasMore);
       setLoading(false);
       setError("");
       setSelectedKeys(new Set());
@@ -319,22 +314,16 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     setLoading(true);
     setError("");
     setItems([]);
-    setMarker("");
     setSelectedKeys(new Set());
-    setHasMore(false);
     try {
       // Fetch with current prefix (lazy: only this directory's scope)
       const res = await fetchFiles(ak, sk, bucket, prefix, "", 1000);
       const newItems = res.items || [];
-      const newMarker = res.marker || "";
-      const newHasMore = !!res.marker;
       
       setItems(newItems);
-      setMarker(newMarker);
-      setHasMore(newHasMore);
       
       // Cache the result
-      dirCache.current.set(prefix, { items: newItems, marker: newMarker, hasMore: newHasMore });
+      dirCache.current.set(prefix, { items: newItems });
     } catch (err: any) {
       setError(err.message || "加载失败");
     } finally {
@@ -345,22 +334,6 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   useEffect(() => {
     loadDirectory(currentPrefix);
   }, [currentPrefix, loadDirectory]);
-
-  // ─── Load more (pagination) ───────────────────────────────────────────────
-  const handleLoadMore = async () => {
-    if (!hasMore || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const res = await fetchFiles(ak, sk, bucket, currentPrefix, marker, 1000);
-      setItems(prev => [...prev, ...(res.items || [])]);
-      if (res.marker) { setMarker(res.marker); setHasMore(true); }
-      else             { setMarker(""); setHasMore(false); }
-    } catch (err: any) {
-      toast.error("加载更多失败", { description: err.message });
-    } finally {
-      setLoadingMore(false);
-    }
-  };
 
   // ─── Derived entries for current level ───────────────────────────────────
   const entries = useMemo(() => deriveEntries(items, currentPrefix), [items, currentPrefix]);
@@ -486,8 +459,7 @@ export function FileManager({ ak, sk, bucket, onBack }: {
       setItems(newItems);
       // Update cache
       if (dirCache.current.has(currentPrefix)) {
-        const cached = dirCache.current.get(currentPrefix)!;
-        dirCache.current.set(currentPrefix, { ...cached, items: newItems });
+        dirCache.current.set(currentPrefix, { items: newItems });
       }
       setFileToDelete(null);
     } catch (err: any) {
@@ -635,7 +607,7 @@ export function FileManager({ ak, sk, bucket, onBack }: {
         <div className="flex items-center gap-2 shrink-0 ml-2">
           {!loading && (
             <span className="text-xs text-zinc-400 hidden md:block tabular-nums">
-              {items.length} 项{hasMore ? '+' : ''}
+              {items.length} 项
             </span>
           )}
           <button
