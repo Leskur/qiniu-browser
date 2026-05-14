@@ -102,14 +102,15 @@ export interface QiniuFile {
 export interface ListFilesResult {
   marker?: string;
   items: QiniuFile[];
-  commonPrefixes?: string[]; // Virtual folder prefixes derived from items
+  commonPrefixes?: string[];
 }
 
 /**
- * 获取指定存储空间下的文件列表（支持 prefix 分层懒加载）
- * @param prefix  当前目录前缀，例如 "photos/2024/"
- * @param marker  分页游标
- * @param limit   每页最大条数（默认 1000）
+ * 获取指定存储空间下的文件列表
+ * @param prefix    当前目录前缀，例如 "photos/2024/"
+ * @param marker    分页游标
+ * @param limit     每页最大条数（默认 1000）
+ * @param delimiter 目录分隔符，传 "/" 时 API 会返回 commonPrefixes（子目录列表）
  */
 export async function fetchFiles(
   ak: string, 
@@ -117,7 +118,8 @@ export async function fetchFiles(
   bucket: string, 
   prefix: string = "", 
   marker: string = "", 
-  limit: number = 1000
+  limit: number = 1000,
+  delimiter: string = ""
 ): Promise<ListFilesResult> {
   const host = "rsf.qiniuapi.com";
   let pathWithQuery = `/list?bucket=${bucket}&limit=${limit}`;
@@ -127,6 +129,9 @@ export async function fetchFiles(
   }
   if (marker) {
     pathWithQuery += `&marker=${encodeURIComponent(marker)}`;
+  }
+  if (delimiter) {
+    pathWithQuery += `&delimiter=${encodeURIComponent(delimiter)}`;
   }
 
   const url = `https://${host}${pathWithQuery}`;

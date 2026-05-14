@@ -9,9 +9,22 @@ interface AppState {
   setBuckets: (buckets: QiniuBucket[]) => void;
   // 计算属性
   getTotalStats: () => { totalBuckets: number; totalFiles: number; totalSize: number };
-  // 主题
+  
+  // 外观设置
   theme: Theme;
   setTheme: (theme: Theme) => void;
+  
+  // 文件管理设置
+  itemsPerPage: 20 | 50 | 100 | 200;
+  setItemsPerPage: (count: 20 | 50 | 100 | 200) => void;
+  
+  // 缓存设置
+  cacheExpireMinutes: number;
+  setCacheExpireMinutes: (minutes: number) => void;
+  
+  // 通知设置
+  notifyOnComplete: boolean;
+  setNotifyOnComplete: (notify: boolean) => void;
 }
 
 /**
@@ -55,16 +68,35 @@ export const useAppStore = create<AppState>()(
           totalSize
         };
       },
+      
+      // 外观设置
       theme: 'system',
       setTheme: (theme) => {
         set({ theme });
         applyThemeToDOM(theme);
       },
+      
+      // 文件管理设置
+      itemsPerPage: 50,
+      setItemsPerPage: (count) => set({ itemsPerPage: count }),
+      
+      // 缓存设置
+      cacheExpireMinutes: 5,
+      setCacheExpireMinutes: (minutes) => set({ cacheExpireMinutes: minutes }),
+      
+      // 通知设置
+      notifyOnComplete: true,
+      setNotifyOnComplete: (notify) => set({ notifyOnComplete: notify }),
     }),
     {
       name: 'qiniu-browser-settings',
-      // Only persist theme, not runtime data like buckets
-      partialize: (state) => ({ theme: state.theme }),
+      // 持久化所有设置（除了 buckets 运行时数据）
+      partialize: (state) => ({
+        theme: state.theme,
+        itemsPerPage: state.itemsPerPage,
+        cacheExpireMinutes: state.cacheExpireMinutes,
+        notifyOnComplete: state.notifyOnComplete,
+      }),
       onRehydrateStorage: () => {
         return (state) => {
           if (state) {

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { QiniuBucket, createBucket, forceDeleteBucket } from "../lib/qiniu";
 import { formatSize, formatDate } from "../lib/utils";
@@ -36,7 +36,9 @@ export function BucketList({
   loading,
   error,
   onSelectBucket,
-  onRefresh
+  onRefresh,
+  scrollPosition = 0,
+  onScrollPositionRestored
 }: {
   buckets: QiniuBucket[],
   ak: string,
@@ -44,13 +46,16 @@ export function BucketList({
   loading: boolean,
   error: string,
   onSelectBucket: (bucket: string) => void,
-  onRefresh: () => void
+  onRefresh: () => void,
+  scrollPosition?: number,
+  onScrollPositionRestored?: () => void
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDesc, setSortDesc] = useState(false);
   const { getTotalStats } = useAppStore();
   const stats = getTotalStats();
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newBucketName, setNewBucketName] = useState("");
@@ -106,6 +111,21 @@ export function BucketList({
 
     return result;
   }, [buckets, searchQuery, sortField, sortDesc]);
+
+  // 恢复滚动位置
+  useEffect(() => {
+    if (scrollPosition > 0 && !loading && processedBuckets.length > 0) {
+      // 使用 requestAnimationFrame 确保 DOM 已渲染
+      requestAnimationFrame(() => {
+        const scrollArea = document.querySelector('[data-radix-scroll-area-viewport]');
+        if (scrollArea) {
+          scrollArea.scrollTop = scrollPosition;
+          // 通知父组件已恢复，清除保存的位置
+          onScrollPositionRestored?.();
+        }
+      });
+    }
+  }, [scrollPosition, loading, processedBuckets.length, onScrollPositionRestored]);
 
   const handleCreateBucket = async (e: React.FormEvent) => {
     e.preventDefault();

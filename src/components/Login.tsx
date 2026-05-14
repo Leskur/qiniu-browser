@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Plus, Trash2, LogIn, Loader2, Eye, EyeOff, ChevronRight } from "lucide-react";
-import { fetchBuckets } from "@/lib/qiniu";
+import { fetchBuckets, QiniuBucket } from "@/lib/qiniu";
 
 interface HistoryItem {
   accessKey: string;
@@ -17,7 +17,7 @@ interface HistoryItem {
 
 type ViewMode = "list" | "form";
 
-export function Login({ onLogin }: { onLogin: (ak: string, sk: string, description?: string) => void }) {
+export function Login({ onLogin }: { onLogin: (ak: string, sk: string, description?: string, buckets?: QiniuBucket[]) => void }) {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -30,16 +30,54 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
   const [showSk, setShowSk] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loggingInKey, setLoggingInKey] = useState<string | null>(null);
+  const [autoLogin, setAutoLogin] = useState(() => {
+    return localStorage.getItem('qiniu_auto_login') === 'true';
+  });
 
   // Kodo import
   const [isImporting, setIsImporting] = useState(false);
   const [showKodoDialog, setShowKodoDialog] = useState(false);
   const [kodoItems, setKodoItems] = useState<HistoryItem[]>([]);
 
-  // Load histories on mount
+  // Load histories on mount and try auto-login
   useEffect(() => {
     loadHistories();
+    tryAutoLogin();
   }, []);
+
+  const tryAutoLogin = async () => {
+    try {
+      // 从 localStorage 获取上次登录的账号
+      const lastLoginKey = localStorage.getItem('qiniu_last_login_ak');
+      const autoLogin = localStorage.getItem('qiniu_auto_login') === 'true';
+      
+      if (!lastLoginKey || !autoLogin) return;
+
+      // 等待历史记录加载完成
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const data = await invoke<string>("get_histories");
+      const parsed = JSON.parse(data);
+      const items: HistoryItem[] = (parsed.historyItems || []).filter(
+        (item: any) => item.accessKey && item.accessSecret
+      );
+      
+      const lastAccount = items.find(item => item.accessKey === lastLoginKey);
+      if (lastAccount) {
+        setLoggingInKey(lastAccount.accessKey);
+        try {
+          await doLogin(lastAccount.accessKey, lastAccount.accessSecret, lastAccount.description);
+        } catch (err: any) {
+          // 自动登录失败，显示登录界面
+          toast.error("自动登录失败", { description: err.message });
+          setLoggingInKey(null);
+        }
+      }
+    } catch (err) {
+      // 忽略自动登录错误
+      console.error('Auto login failed:', err);
+    }
+  };
 
   const loadHistories = async () => {
     setLoadingHistory(true);
@@ -60,8 +98,12 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
 
   const doLogin = async (loginAk: string, loginSk: string, loginDescription?: string) => {
     try {
-      await fetchBuckets(loginAk, loginSk);
-      onLogin(loginAk, loginSk, loginDescription);
+      // 直接获取 Bucket 列表，同时验证凭证
+      const buckets = await fetchBuckets(loginAk, loginSk);
+      // 保存上次登录的账号
+      localStorage.setItem('qiniu_last_login_ak', loginAk);
+      // 登录成功，传递 buckets 数据
+      onLogin(loginAk, loginSk, loginDescription, buckets);
     } catch (err: any) {
       throw new Error(err.message || "AK/SK 无效，请检查后重试");
     }
@@ -184,6 +226,22 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
           {/* ── Account list mode ── */}
           {viewMode === "list" && (
             <div className="space-y-3">
+              {/* Auto-login toggle */}
+              <div className="flex items-center justify-between px-1 py-2">
+                <Label htmlFor="autoLoginToggle" className="text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer">
+                  自动登录上次使用的账号
+                </Label>
+                <Checkbox
+                  id="autoLoginToggle"
+                  checked={autoLogin}
+                  onCheckedChange={(checked) => {
+                    const value = checked === true;
+                    setAutoLogin(value);
+                    localStorage.setItem('qiniu_auto_login', value.toString());
+                  }}
+                />
+              </div>
+
               {loadingHistory ? (
                 <div className="flex justify-center py-8">
                   <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
@@ -297,15 +355,31 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                   className="transition-all duration-200 focus:ring-2 focus:ring-emerald-500/50"
                 />
               </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="remember"
-                  checked={rememberMe}
-                  onCheckedChange={(checked) => setRememberMe(checked === true)}
-                />
-                <Label htmlFor="remember" className="text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer">
-                  记住凭证
-                </Label>
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="remember"
+                    checked={rememberMe}
+                    onCheckedChange={(checked) => setRememberMe(checked === true)}
+                  />
+                  <Label htmlFor="remember" className="text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer">
+                    记住凭证
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="autoLogin"
+                    checked={autoLogin}
+                    onCheckedChange={(checked) => {
+                      const value = checked === true;
+                      setAutoLogin(value);
+                      localStorage.setItem('qiniu_auto_login', value.toString());
+                    }}
+                  />
+                  <Label htmlFor="autoLogin" className="text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer">
+                    下次自动登录
+                  </Label>
+                </div>
               </div>
               <Button
                 type="submit"

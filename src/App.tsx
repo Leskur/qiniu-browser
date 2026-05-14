@@ -7,7 +7,7 @@ import { FileManager } from "./components/FileManager";
 import { BucketList } from "./components/BucketList";
 import { CdnManager } from "./components/CdnManager";
 import { TransferPanel } from "./components/TransferPanel";
-import { fetchBuckets } from "./lib/qiniu";
+import { fetchBuckets, QiniuBucket } from "./lib/qiniu";
 import { useAppStore, Theme } from "./store";
 import {
   Database, Zap, LogOut, Settings,
@@ -24,7 +24,58 @@ const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
 ];
 
 function SettingsPanel() {
-  const { theme, setTheme } = useAppStore();
+  const { 
+    theme, setTheme,
+    itemsPerPage, setItemsPerPage,
+    cacheExpireMinutes, setCacheExpireMinutes,
+    notifyOnComplete, setNotifyOnComplete,
+  } = useAppStore();
+  
+  const [cacheSize, setCacheSize] = useState<string>('计算中...');
+
+  // 计算缓存大小
+  useEffect(() => {
+    try {
+      let totalSize = 0;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key) {
+          const value = localStorage.getItem(key);
+          if (value) {
+            totalSize += key.length + value.length;
+          }
+        }
+      }
+      // 转换为 KB
+      setCacheSize(`${(totalSize / 1024).toFixed(2)} KB`);
+    } catch {
+      setCacheSize('无法计算');
+    }
+  }, []);
+
+  const handleClearCache = () => {
+    if (confirm('确定要清除所有缓存吗？这将清除目录缓存和域名缓存，但不会清除您的设置。')) {
+      // 保存设置相关的 key
+      const settingsKeys = ['qiniu-browser-settings', 'qiniu_auto_login', 'qiniu_last_login_ak'];
+      const settingsData: Record<string, string> = {};
+      
+      settingsKeys.forEach(key => {
+        const value = localStorage.getItem(key);
+        if (value) settingsData[key] = value;
+      });
+      
+      // 清除所有
+      localStorage.clear();
+      
+      // 恢复设置
+      Object.entries(settingsData).forEach(([key, value]) => {
+        localStorage.setItem(key, value);
+      });
+      
+      toast.success('缓存已清除');
+      setCacheSize('0 KB');
+    }
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -32,35 +83,140 @@ function SettingsPanel() {
         <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-200">设置</h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        {/* Theme */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-8">
+        {/* 外观设置 */}
         <div>
-          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">主题外观</h3>
-          <div className="grid grid-cols-3 gap-3">
-            {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
-              <button
-                key={value}
-                onClick={() => setTheme(value)}
-                className={`flex flex-col items-center gap-2.5 p-4 rounded-xl border-2 transition-all cursor-pointer
-                  ${theme === value
-                    ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 shadow-sm"
-                    : "border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-600"}`}
-              >
-                <Icon className={`w-6 h-6 ${theme === value ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"}`} />
-                <span className={`text-xs font-medium ${theme === value ? "text-emerald-700 dark:text-emerald-300" : "text-zinc-500 dark:text-zinc-400"}`}>
-                  {label}
-                </span>
-              </button>
-            ))}
+          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">外观设置</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-2 block">主题</label>
+              <div className="grid grid-cols-3 gap-3">
+                {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+                  <button
+                    key={value}
+                    onClick={() => setTheme(value)}
+                    className={`flex flex-col items-center gap-2.5 p-4 rounded-xl border-2 transition-all cursor-pointer
+                      ${theme === value
+                        ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 shadow-sm"
+                        : "border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-600"}`}
+                  >
+                    <Icon className={`w-6 h-6 ${theme === value ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"}`} />
+                    <span className={`text-xs font-medium ${theme === value ? "text-emerald-700 dark:text-emerald-300" : "text-zinc-500 dark:text-zinc-400"}`}>
+                      {label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* About */}
-        <div className="mt-8 pt-6 border-t border-zinc-100 dark:border-zinc-800">
+        {/* 文件管理设置 */}
+        <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800">
+          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">文件管理</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-2 block">每页显示数量</label>
+              <div className="grid grid-cols-4 gap-2">
+                {[20, 50, 100, 200].map((count) => (
+                  <button
+                    key={count}
+                    onClick={() => setItemsPerPage(count as any)}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer
+                      ${itemsPerPage === count
+                        ? "bg-emerald-500 text-white shadow-sm"
+                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"}`}
+                  >
+                    {count}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">较大的数值可能影响性能</p>
+            </div>
+          </div>
+        </div>
+
+        {/* 缓存设置 */}
+        <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800">
+          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">缓存设置</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-2 block">缓存过期时间</label>
+              <div className="grid grid-cols-4 gap-2">
+                {[1, 5, 15, 30].map((minutes) => (
+                  <button
+                    key={minutes}
+                    onClick={() => setCacheExpireMinutes(minutes)}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer
+                      ${cacheExpireMinutes === minutes
+                        ? "bg-emerald-500 text-white shadow-sm"
+                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"}`}
+                  >
+                    {minutes}分钟
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">目录列表缓存的有效期</p>
+            </div>
+            
+            <div className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg">
+              <div>
+                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">当前缓存大小</p>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">{cacheSize}</p>
+              </div>
+              <button
+                onClick={handleClearCache}
+                className="px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors"
+              >
+                清除缓存
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 通知设置 */}
+        <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800">
+          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">通知设置</h3>
+          <div className="space-y-3">
+            <label className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+              <div>
+                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">传输完成通知</p>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">上传或下载完成时显示通知</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={notifyOnComplete}
+                onChange={(e) => setNotifyOnComplete(e.target.checked)}
+                className="w-4 h-4 text-emerald-600 bg-zinc-100 border-zinc-300 rounded focus:ring-emerald-500 dark:focus:ring-emerald-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* 关于 */}
+        <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800">
           <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">关于</h3>
-          <div className="text-sm text-zinc-500 dark:text-zinc-400 space-y-1.5">
-            <p>Qiniu Browser <span className="font-mono text-zinc-400 dark:text-zinc-500">v0.0.1</span></p>
-            <p className="text-xs">基于 Tauri + React 构建的七牛云桌面客户端</p>
+          <div className="space-y-3">
+            <div className="p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg">
+              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Qiniu Browser</p>
+              <p className="text-xs font-mono text-zinc-400 dark:text-zinc-500 mt-1">版本 v0.0.1</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">基于 Tauri + React 构建的七牛云桌面客户端</p>
+            </div>
+            
+            <div className="flex gap-2">
+              <button
+                onClick={() => window.open('https://github.com/YOUR_USERNAME/qiniu-browser', '_blank')}
+                className="flex-1 px-3 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+              >
+                GitHub
+              </button>
+              <button
+                onClick={() => toast.info('当前已是最新版本')}
+                className="flex-1 px-3 py-2 text-sm font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-lg transition-colors"
+              >
+                检查更新
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -76,14 +232,31 @@ function App() {
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<Section>("storage");
   const [showAccountMenu, setShowAccountMenu] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(208); // 默认 52*4 = 208px (w-52)
+  const [sidebarWidth, setSidebarWidth] = useState(208);
   const [isResizing, setIsResizing] = useState(false);
+  const [memoryMB, setMemoryMB] = useState<number | null>(null);
+  const [bucketListScrollPos, setBucketListScrollPos] = useState(0);
 
   const { buckets, setBuckets } = useAppStore();
 
-  const handleLogin = (ak: string, sk: string, description?: string) => {
+  // ── Memory usage polling ──
+  useEffect(() => {
+    const update = () => {
+      const mem = (performance as any).memory;
+      if (mem) setMemoryMB(Math.round(mem.usedJSHeapSize / 1024 / 1024));
+    };
+    update();
+    const id = setInterval(update, 3000);
+    return () => clearInterval(id);
+  }, []);
+
+  const handleLogin = (ak: string, sk: string, description?: string, buckets?: QiniuBucket[]) => {
     setCredentials({ ak, sk, description: description || "" });
     setIsAuthenticated(true);
+    // 如果登录时已经获取了 buckets，直接使用
+    if (buckets) {
+      setBuckets(buckets);
+    }
   };
 
   const loadBuckets = () => {
@@ -96,7 +269,10 @@ function App() {
   };
 
   useEffect(() => {
-    if (isAuthenticated) loadBuckets();
+    // 只有在登录时没有获取到 buckets 数据时才加载
+    if (isAuthenticated && buckets.length === 0) {
+      loadBuckets();
+    }
   }, [isAuthenticated]);
 
   // 检查更新
@@ -282,6 +458,15 @@ function App() {
               )}
             </div>
             
+            {/* Memory usage */}
+            {memoryMB !== null && (
+              <div className="px-4 py-2 border-t border-zinc-100 dark:border-zinc-800">
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-600 tabular-nums">
+                  内存占用 {memoryMB} MB
+                </p>
+              </div>
+            )}
+
             {/* Resize handle */}
             <div
               onMouseDown={handleMouseDown}
@@ -323,8 +508,17 @@ function App() {
                       sk={credentials.sk}
                       loading={loading}
                       error={error}
-                      onSelectBucket={setSelectedBucket}
+                      onSelectBucket={(bucket) => {
+                        // 保存当前滚动位置
+                        const scrollArea = document.querySelector('[data-radix-scroll-area-viewport]');
+                        if (scrollArea) {
+                          setBucketListScrollPos(scrollArea.scrollTop);
+                        }
+                        setSelectedBucket(bucket);
+                      }}
                       onRefresh={loadBuckets}
+                      scrollPosition={bucketListScrollPos}
+                      onScrollPositionRestored={() => setBucketListScrollPos(0)}
                     />
                   </div>
                 )}

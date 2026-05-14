@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchFiles, fetchBucketDomains, QiniuFile, deleteFile, deleteDirectory, generateDownloadUrl, batchDeleteFiles, renameFile } from "../lib/qiniu";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
-import { ScrollArea } from "./ui/scroll-area";
 import { Skeleton } from "./ui/skeleton";
 import {
   File, Image, Film, FileText, Archive,
@@ -39,45 +38,11 @@ export function getFileIcon(mimeType: string) {
   return <File className="w-4 h-4 text-zinc-400" />;
 }
 
-// ─── Virtual filesystem helpers ───────────────────────────────────────────────
+// ─── Component ────────────────────────────────────────────────────────────────
 
 type VirtualEntry =
   | { type: 'folder'; name: string; prefix: string }
   | { type: 'file'; name: string; file: QiniuFile };
-
-/**
- * From a flat list of items (all starting with `prefix`),
- * derive the entries for the current directory level:
- * - Items directly at this level → files
- * - Items with more path segments → deduplicated virtual folders
- */
-function deriveEntries(items: QiniuFile[], prefix: string): VirtualEntry[] {
-  const folderSet = new Map<string, string>(); // folderName → full prefix
-  const fileEntries: VirtualEntry[] = [];
-
-  for (const item of items) {
-    const rest = item.key.slice(prefix.length);
-    const slashIdx = rest.indexOf('/');
-    if (slashIdx === -1) {
-      fileEntries.push({ type: 'file', name: rest, file: item });
-    } else {
-      const folderName = rest.slice(0, slashIdx);
-      if (!folderSet.has(folderName)) {
-        folderSet.set(folderName, prefix + folderName + '/');
-      }
-    }
-  }
-
-  const folderEntries: VirtualEntry[] = [...folderSet.entries()].map(([name, pfx]) => ({
-    type: 'folder', name, prefix: pfx,
-  }));
-
-  folderEntries.sort((a, b) => a.name.localeCompare(b.name));
-  fileEntries.sort((a, b) => a.name.localeCompare(b.name));
-  return [...folderEntries, ...fileEntries];
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
 
 export function FileManager({ ak, sk, bucket, onBack }: {
   ak: string; sk: string; bucket: string; onBack: () => void
@@ -142,12 +107,16 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   }, [goBack, goForward]);
 
   // ── Per-directory data state ──
-  const [items, setItems]       = useState<QiniuFile[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState("");
+  const [items, setItems]           = useState<QiniuFile[]>([]);
+  const [folders, setFolders]       = useState<string[]>([]); // commonPrefixes from API
+  const [nextMarker, setNextMarker] = useState<string>("");
+  const [hasMore, setHasMore]       = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState("");
 
   // ── Directory cache ──
-  const dirCache = useRef<Map<string, { items: QiniuFile[] }>>(new Map());
+  const dirCache = useRef<Map<string, { items: QiniuFile[]; folders: string[]; nextMarker: string; hasMore: boolean }>>(new Map());
 
   // ── Detail modal state ──
   const [selectedFile, setSelectedFile] = useState<QiniuFile | null>(null);
@@ -276,6 +245,27 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   // ── Breadcrumb overflow menu ──
   const [breadcrumbMenuOpen, setBreadcrumbMenuOpen] = useState(false);
 
+  // ── Scroll container ref ──
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // ── Keyboard scroll shortcuts (PgUp/PgDn/Home/End) ──
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const el = scrollContainerRef.current;
+      if (!el) return;
+      switch (e.key) {
+        case 'PageDown': e.preventDefault(); el.scrollBy({ top: el.clientHeight * 0.9, behavior: 'smooth' }); break;
+        case 'PageUp':   e.preventDefault(); el.scrollBy({ top: -el.clientHeight * 0.9, behavior: 'smooth' }); break;
+        case 'Home':     e.preventDefault(); el.scrollTo({ top: 0, behavior: 'smooth' }); break;
+        case 'End':      e.preventDefault(); el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   // ── Sort state ──
   type SortField = 'name' | 'size' | 'time';
   type SortDir = 'asc' | 'desc';
@@ -356,7 +346,7 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     setPanelOpen(true); // Open transfer panel
     
     try {
-      const result: { uploaded: string[]; failed: string[] } = await invoke('upload_files', { ak, sk, bucket, filePaths: paths });
+      const result: { uploaded: string[]; failed: string[] } = await invoke('upload_files', { ak, sk, bucket, filePaths: paths, prefix: currentPrefix });
       
       // Only show toast for failures, progress panel shows success
       if (result.failed.length > 0) {
@@ -402,6 +392,9 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     if (!forceRefresh && dirCache.current.has(prefix)) {
       const cached = dirCache.current.get(prefix)!;
       setItems(cached.items);
+      setFolders(cached.folders);
+      setNextMarker(cached.nextMarker);
+      setHasMore(cached.hasMore);
       setLoading(false);
       setError("");
       setSelectedKeys(new Set());
@@ -411,16 +404,22 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     setLoading(true);
     setError("");
     setItems([]);
+    setFolders([]);
+    setNextMarker("");
+    setHasMore(false);
     setSelectedKeys(new Set());
     try {
-      // Fetch with current prefix (lazy: only this directory's scope)
-      const res = await fetchFiles(ak, sk, bucket, prefix, "", 1000);
+      const res = await fetchFiles(ak, sk, bucket, prefix, "", 50, "/");
       const newItems = res.items || [];
-      
+      const newFolders = res.commonPrefixes || [];
+      const newMarker = res.marker || "";
+      const newHasMore = !!res.marker;
+
       setItems(newItems);
-      
-      // Cache the result
-      dirCache.current.set(prefix, { items: newItems });
+      setFolders(newFolders);
+      setNextMarker(newMarker);
+      setHasMore(newHasMore);
+      dirCache.current.set(prefix, { items: newItems, folders: newFolders, nextMarker: newMarker, hasMore: newHasMore });
     } catch (err: any) {
       setError(err.message || "加载失败");
     } finally {
@@ -428,12 +427,58 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     }
   }, [ak, sk, bucket]);
 
+  // ─── Load more (next page) ────────────────────────────────────────────────
+  const loadMore = useCallback(async () => {
+    if (!hasMore || loadingMore || !nextMarker) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchFiles(ak, sk, bucket, currentPrefix, nextMarker, 50, "/");
+      const moreItems = res.items || [];
+      const moreFolders = res.commonPrefixes || [];
+      const newMarker = res.marker || "";
+      const newHasMore = !!res.marker;
+
+      setItems(prev => [...prev, ...moreItems]);
+      setFolders(prev => {
+        // merge without duplicates
+        const existing = new Set(prev);
+        return [...prev, ...moreFolders.filter(f => !existing.has(f))];
+      });
+      setNextMarker(newMarker);
+      setHasMore(newHasMore);
+      // Update cache
+      dirCache.current.set(currentPrefix, {
+        items: [...items, ...moreItems],
+        folders: [...new Set([...folders, ...moreFolders])],
+        nextMarker: newMarker,
+        hasMore: newHasMore,
+      });
+    } catch (err: any) {
+      toast.error("加载更多失败", { description: err.message });
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [ak, sk, bucket, currentPrefix, nextMarker, hasMore, loadingMore, items, folders]);
+
   useEffect(() => {
     loadDirectory(currentPrefix);
   }, [currentPrefix, loadDirectory]);
 
   // ─── Derived entries for current level ───────────────────────────────────
-  const entries = useMemo(() => deriveEntries(items, currentPrefix), [items, currentPrefix]);
+  // folders come directly from API commonPrefixes, files from items
+  const entries = useMemo((): VirtualEntry[] => {
+    const folderEntries: VirtualEntry[] = folders.map(pfx => ({
+      type: 'folder',
+      name: pfx.slice(currentPrefix.length).replace(/\/$/, ''),
+      prefix: pfx,
+    }));
+    const fileEntries: VirtualEntry[] = items.map(file => ({
+      type: 'file',
+      name: file.key.slice(currentPrefix.length),
+      file,
+    }));
+    return [...folderEntries, ...fileEntries];
+  }, [folders, items, currentPrefix]);
   const allFileKeys = useMemo(
     () => entries.filter(e => e.type === 'file').map(e => (e as { type: 'file'; name: string; file: QiniuFile }).file.key),
     [entries]
@@ -453,8 +498,27 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     return [...folders, ...sorted];
   }, [entries, sortField, sortDir]);
 
-  const toggleSelectAll = () => {
-    if (allSelected) {
+  // ── Auto load more on scroll to bottom ──
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const handler = () => {
+      if (!hasMore || loadingMore) return;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
+        loadMore();
+      }
+    };
+    el.addEventListener('scroll', handler, { passive: true });
+    return () => el.removeEventListener('scroll', handler);
+  }, [hasMore, loadingMore, loadMore]);
+  const rowVirtualizer = useVirtualizer({
+    count: sortedEntries.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => 44, // row height in px
+    overscan: 10,
+  });
+
+  const toggleSelectAll = () => {    if (allSelected) {
       setSelectedKeys(new Set());
     } else {
       setSelectedKeys(new Set(allFileKeys));
@@ -616,7 +680,7 @@ export function FileManager({ ak, sk, bucket, onBack }: {
       setItems(newItems);
       // Update cache
       if (dirCache.current.has(currentPrefix)) {
-        dirCache.current.set(currentPrefix, { items: newItems });
+        dirCache.current.set(currentPrefix, { items: newItems, folders, nextMarker, hasMore });
       }
       setFileToDelete(null);
     } catch (err: any) {
@@ -844,179 +908,163 @@ export function FileManager({ ak, sk, bucket, onBack }: {
             <p className="text-sm mt-1">上传一些文件来开始吧</p>
           </div>
         ) : (
-          <ScrollArea className="h-full w-full">
-            <Table>
-              <TableHeader className="sticky top-0 bg-white dark:bg-zinc-900 z-10 shadow-sm">
-                <TableRow className="hover:bg-transparent border-zinc-100 dark:border-zinc-800">
-                  <TableHead className="pl-4 w-10">
+          <div ref={scrollContainerRef} className="h-full overflow-y-auto">
+            {/* Sticky header */}
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shadow-sm">
+                <tr>
+                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap pl-4 w-10">
                     <button onClick={toggleSelectAll} className="p-0.5 text-zinc-400 hover:text-emerald-500 transition-colors">
                       {allSelected
                         ? <CheckSquare className="w-4 h-4 text-emerald-500" />
                         : <Square className="w-4 h-4" />}
                     </button>
-                  </TableHead>
-                  <TableHead className="pl-1">
+                  </th>
+                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap pl-1">
                     <button onClick={() => cycleSort('name')} className="flex items-center text-xs font-semibold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
                       名称<SortIcon field="name" />
                     </button>
-                  </TableHead>
-                  <TableHead className="w-28">
+                  </th>
+                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-28">
                     <button onClick={() => cycleSort('size')} className="flex items-center text-xs font-semibold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
                       大小<SortIcon field="size" />
                     </button>
-                  </TableHead>
-                  <TableHead className="w-52 hidden md:table-cell text-xs font-semibold text-zinc-500">类型</TableHead>
-                  <TableHead className="w-44 hidden lg:table-cell">
+                  </th>
+                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-52 hidden md:table-cell text-xs font-semibold text-zinc-500">类型</th>
+                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-44 hidden lg:table-cell">
                     <button onClick={() => cycleSort('time')} className="flex items-center text-xs font-semibold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
                       修改时间<SortIcon field="time" />
                     </button>
-                  </TableHead>
-                  <TableHead className="text-right pr-5 w-44 text-xs font-semibold text-zinc-500">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedEntries.map((entry) => {
-                  if (entry.type === 'folder') {
-                    return (
-                      <TableRow
-                        key={`d:${entry.prefix}`}
-                        className={`group cursor-pointer border-zinc-100 dark:border-zinc-800/60 hover:bg-amber-50/40 dark:hover:bg-amber-900/10 transition-colors ${dirToDelete === entry.prefix && isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
-                        onClick={() => navigateToFolder(entry.prefix)}
-                      >
-                        <TableCell className="pl-4 w-10" />
-                        <TableCell className="pl-1">
-                          <div className="flex items-center gap-3">
-                            <Folder className="w-4 h-4 text-amber-400 shrink-0" />
-                            <span className="font-medium text-zinc-700 dark:text-zinc-200">{entry.name}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-zinc-400 text-sm">—</TableCell>
-                        <TableCell className="hidden md:table-cell">
-                          <span className="bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded text-xs font-medium">
-                            文件夹
-                          </span>
-                        </TableCell>
-                        <TableCell className="hidden lg:table-cell text-zinc-400 text-sm">—</TableCell>
-                        <TableCell className="pr-5 text-right">
-                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDownloadFolder(entry.prefix);
-                              }}
-                              className="p-1.5 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded"
-                              title="下载整个文件夹"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDirToDelete(entry.prefix);
-                              }}
-                              className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
-                              title="删除整个目录"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                            <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600 ml-1" />
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  }
+                  </th>
+                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-right pr-5 w-44 text-xs font-semibold text-zinc-500">操作</th>
+                </tr>
+              </thead>
+            </table>
 
-                  const { file } = entry;
-                  const isChecked = selectedKeys.has(file.key);
-                  const isRenaming = renamingKey === file.key;
+            {/* Virtual rows */}
+            <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
+              {rowVirtualizer.getVirtualItems().map(virtualRow => {
+                const entry = sortedEntries[virtualRow.index];
+                const rowStyle: React.CSSProperties = {
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: `${virtualRow.size}px`,
+                  transform: `translateY(${virtualRow.start}px)`,
+                };
+
+                if (entry.type === 'folder') {
                   return (
-                    <TableRow
-                      key={`f:${file.key}`}
-                      onClick={() => !someSelected && !isRenaming && setSelectedFile(file)}
-                      onContextMenu={(e) => openCtxMenu(e, file)}
-                      className={`group cursor-pointer border-zinc-100 dark:border-zinc-800/60 transition-colors
-                        ${isChecked ? 'bg-emerald-50/60 dark:bg-emerald-900/10 hover:bg-emerald-50 dark:hover:bg-emerald-900/20' : 'hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30'}
-                        ${fileToDelete === file.key && isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
+                    <div
+                      key={`d:${entry.prefix}`}
+                      style={rowStyle}
+                      className={`group flex items-center cursor-pointer border-b border-zinc-100 dark:border-zinc-800/60 hover:bg-amber-50/40 dark:hover:bg-amber-900/10 transition-colors text-sm ${dirToDelete === entry.prefix && isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
+                      onClick={() => navigateToFolder(entry.prefix)}
                     >
-                      <TableCell className="pl-4 w-10" onClick={e => toggleSelect(file.key, e)}>
-                        <button className="p-0.5 text-zinc-400 hover:text-emerald-500 transition-colors">
-                          {isChecked
-                            ? <CheckSquare className="w-4 h-4 text-emerald-500" />
-                            : <Square className="w-4 h-4 opacity-0 group-hover:opacity-100" />}
-                        </button>
-                      </TableCell>
-                      <TableCell className="pl-1">
-                        <div className="flex items-center gap-3">
-                          {getFileIcon(file.mimeType)}
-                          {isRenaming ? (
-                            <input
-                              autoFocus
-                              value={renameValue}
-                              onChange={e => setRenameValue(e.target.value)}
-                              onBlur={() => commitRename(file.key)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') commitRename(file.key);
-                                if (e.key === 'Escape') setRenamingKey(null);
-                              }}
-                              onClick={e => e.stopPropagation()}
-                              className="flex-1 max-w-[220px] px-2 py-0.5 text-sm rounded border border-emerald-400 dark:border-emerald-600 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-emerald-400/40"
-                            />
-                          ) : (
-                            <span className="truncate max-w-[240px] text-zinc-700 dark:text-zinc-200" title={file.key}>
-                              {entry.name}
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-zinc-500 font-mono text-xs tabular-nums">{formatBytes(file.fsize)}</TableCell>
-                      <TableCell className="hidden md:table-cell">
-                        <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-2 py-0.5 rounded text-xs">
-                          {file.mimeType || 'unknown'}
-                        </span>
-                      </TableCell>
-                      <TableCell className="hidden lg:table-cell text-zinc-400 text-xs tabular-nums">{formatQiniuTime(file.putTime)}</TableCell>
-                      <TableCell className="pr-5">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={(e) => startRename(e, file)}
-                            className="p-1.5 text-zinc-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded opacity-0 group-hover:opacity-100 transition-all"
-                            title="重命名"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDownload(file.key); }}
-                            className="p-1.5 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded opacity-0 group-hover:opacity-100 transition-all"
-                            title="下载文件"
-                          >
+                      <div className="pl-4 w-10 shrink-0" />
+                      <div className="flex-1 pl-1 flex items-center gap-3 min-w-0">
+                        <Folder className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span className="font-medium text-zinc-700 dark:text-zinc-200 truncate">{entry.name}</span>
+                      </div>
+                      <div className="w-28 shrink-0 text-zinc-400">—</div>
+                      <div className="w-52 shrink-0 hidden md:block">
+                        <span className="bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded text-xs font-medium">文件夹</span>
+                      </div>
+                      <div className="w-44 shrink-0 hidden lg:block text-zinc-400">—</div>
+                      <div className="w-44 shrink-0 pr-5">
+                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={(e) => { e.stopPropagation(); handleDownloadFolder(entry.prefix); }}
+                            className="p-1.5 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded" title="下载整个文件夹">
                             <Download className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={(e) => handleCopyLink(e, file.key)}
-                            className={`text-xs font-medium px-2 py-1.5 rounded-md transition-all flex items-center gap-1
-                              ${copiedKey === file.key
-                                ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
-                                : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 opacity-0 group-hover:opacity-100'}`}
-                          >
-                            {copiedKey === file.key
-                              ? <><Check className="w-3 h-3" />已复制</>
-                              : <><Link2 className="w-3 h-3" />复制链接</>}
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setFileToDelete(file.key); }}
-                            className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded opacity-0 group-hover:opacity-100 transition-all"
-                            title="删除文件"
-                          >
+                          <button onClick={(e) => { e.stopPropagation(); setDirToDelete(entry.prefix); }}
+                            className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded" title="删除整个目录">
                             <Trash2 className="w-4 h-4" />
                           </button>
+                          <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600 ml-1" />
                         </div>
-                      </TableCell>
-                    </TableRow>
+                      </div>
+                    </div>
                   );
-                })}
-              </TableBody>
-            </Table>
-          </ScrollArea>
+                }
+
+                const { file } = entry;
+                const isChecked = selectedKeys.has(file.key);
+                const isRenaming = renamingKey === file.key;
+                return (
+                  <div
+                    key={`f:${file.key}`}
+                    style={rowStyle}
+                    onClick={() => !someSelected && !isRenaming && setSelectedFile(file)}
+                    onContextMenu={(e) => openCtxMenu(e, file)}
+                    className={`group flex items-center cursor-pointer border-b border-zinc-100 dark:border-zinc-800/60 transition-colors text-sm
+                      ${isChecked ? 'bg-emerald-50/60 dark:bg-emerald-900/10 hover:bg-emerald-50 dark:hover:bg-emerald-900/20' : 'hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30'}
+                      ${fileToDelete === file.key && isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
+                  >
+                    <div className="pl-4 w-10 shrink-0" onClick={e => toggleSelect(file.key, e)}>
+                      <button className="p-0.5 text-zinc-400 hover:text-emerald-500 transition-colors">
+                        {isChecked
+                          ? <CheckSquare className="w-4 h-4 text-emerald-500" />
+                          : <Square className="w-4 h-4 opacity-0 group-hover:opacity-100" />}
+                      </button>
+                    </div>
+                    <div className="flex-1 pl-1 flex items-center gap-3 min-w-0">
+                      {getFileIcon(file.mimeType)}
+                      {isRenaming ? (
+                        <input autoFocus value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onBlur={() => commitRename(file.key)}
+                          onKeyDown={e => { if (e.key === 'Enter') commitRename(file.key); if (e.key === 'Escape') setRenamingKey(null); }}
+                          onClick={e => e.stopPropagation()}
+                          className="flex-1 max-w-[220px] px-2 py-0.5 text-sm rounded border border-emerald-400 dark:border-emerald-600 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-emerald-400/40"
+                        />
+                      ) : (
+                        <span className="truncate max-w-[240px] text-zinc-700 dark:text-zinc-200" title={file.key}>{entry.name}</span>
+                      )}
+                    </div>
+                    <div className="w-28 shrink-0 font-mono text-xs tabular-nums text-zinc-500">{formatBytes(file.fsize)}</div>
+                    <div className="w-52 shrink-0 hidden md:block">
+                      <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-2 py-0.5 rounded text-xs">{file.mimeType || 'unknown'}</span>
+                    </div>
+                    <div className="w-44 shrink-0 hidden lg:block text-zinc-400 text-xs tabular-nums">{formatQiniuTime(file.putTime)}</div>
+                    <div className="w-44 shrink-0 pr-5">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={(e) => startRename(e, file)}
+                          className="p-1.5 text-zinc-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded opacity-0 group-hover:opacity-100 transition-all" title="重命名">
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); handleDownload(file.key); }}
+                          className="p-1.5 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded opacity-0 group-hover:opacity-100 transition-all" title="下载文件">
+                          <Download className="w-4 h-4" />
+                        </button>
+                        <button onClick={(e) => handleCopyLink(e, file.key)}
+                          className={`text-xs font-medium px-2 py-1.5 rounded-md transition-all flex items-center gap-1
+                            ${copiedKey === file.key
+                              ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
+                              : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 opacity-0 group-hover:opacity-100'}`}>
+                          {copiedKey === file.key ? <><Check className="w-3 h-3" />已复制</> : <><Link2 className="w-3 h-3" />复制链接</>}
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); setFileToDelete(file.key); }}
+                          className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded opacity-0 group-hover:opacity-100 transition-all" title="删除文件">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Load more indicator */}
+            {hasMore && (
+              <div className="flex justify-center py-4 text-xs text-zinc-400">
+                {loadingMore
+                  ? <span className="flex items-center gap-2"><div className="w-3.5 h-3.5 border-2 border-zinc-300/40 border-t-zinc-400 rounded-full animate-spin" />加载中...</span>
+                  : <span className="text-zinc-300 dark:text-zinc-600">向下滚动加载更多</span>}
+              </div>
+            )}
+          </div>
         )}
       </div>
 

@@ -137,40 +137,39 @@ fn delete_history(access_key: String) -> Result<(), String> {
 }
 
 use qiniu_sdk::credential::Credential;
-use qiniu_sdk::upload::{UploadManager, UploadTokenSigner, AutoUploaderObjectParams, AutoUploader};
+use qiniu_sdk::upload::{UploadManager, UploadTokenSigner, AutoUploaderObjectParams, AutoUploader, UploaderWithCallbacks};
 use std::time::Duration;
 use rayon::prelude::*;
 use std::sync::{Mutex, Arc};
 use tauri::{Emitter, AppHandle};
 
 
-fn collect_files(paths: Vec<String>) -> Vec<(PathBuf, String)> {
+fn collect_files(paths: Vec<String>, prefix: &str) -> Vec<(PathBuf, String)> {
     let mut result = Vec::new();
     for path_str in paths {
         let path = PathBuf::from(&path_str);
         if path.is_dir() {
-            // Walk directory and collect all files, preserving relative paths as keys
             let base = path.clone();
             let walker = walkdir::WalkDir::new(&path).into_iter().filter_map(|e| e.ok());
             for entry in walker {
                 if entry.file_type().is_file() {
                     let file_path = entry.path().to_path_buf();
-                    // Use relative path from the parent of the directory as key
-                    let key = file_path
+                    let rel = file_path
                         .strip_prefix(base.parent().unwrap_or(&base))
                         .unwrap_or(&file_path)
                         .to_string_lossy()
                         .replace('\\', "/");
+                    let key = format!("{}{}", prefix, rel);
                     result.push((file_path, key));
                 }
             }
         } else {
-            // Single file — use just the filename as key
-            let key = path
+            let filename = path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown")
                 .to_string();
+            let key = format!("{}{}", prefix, filename);
             result.push((path, key));
         }
     }
@@ -214,6 +213,7 @@ async fn upload_files(
     sk: String,
     bucket: String,
     file_paths: Vec<String>,
+    prefix: String,
 ) -> Result<UploadResult, String> {
     let app_clone = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -225,7 +225,7 @@ async fn upload_files(
             )
         ).build();
 
-        let files = collect_files(file_paths);
+        let files = collect_files(file_paths, &prefix);
         let uploaded: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let failed: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -249,10 +249,32 @@ async fn upload_files(
                 error: None,
             });
 
-            let auto_uploader: AutoUploader<md5::Md5> = upload_manager.auto_uploader();
+            let mut auto_uploader: AutoUploader<md5::Md5> = upload_manager.auto_uploader();
             let auto_params = AutoUploaderObjectParams::builder()
                 .object_name(key.clone())
                 .build();
+
+            // Register progress callback
+            let app_progress = app_clone.clone();
+            let task_id_progress = task_id.clone();
+            let file_name_progress = file_name.clone();
+            let file_path_progress = file_path.clone();
+            auto_uploader.on_upload_progress(move |info| {
+                let uploaded = info.transferred_bytes();
+                let total = info.total_bytes().unwrap_or(total_size);
+                let progress = if total > 0 { uploaded as f64 / total as f64 * 100.0 } else { 0.0 };
+                let _ = app_progress.emit("upload-progress", UploadProgressEvent {
+                    task_id: task_id_progress.clone(),
+                    file_name: file_name_progress.clone(),
+                    file_path: file_path_progress.clone(),
+                    total_size: total,
+                    uploaded_size: uploaded,
+                    progress,
+                    status: "uploading".to_string(),
+                    error: None,
+                });
+                Ok(())
+            });
             
             match auto_uploader.upload_path(path, auto_params) {
                 Ok(_) => {
