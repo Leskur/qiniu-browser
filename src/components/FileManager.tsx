@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { fetchFiles, fetchBucketDomains, QiniuFile, deleteFile, deleteDirectory, generateDownloadUrl, batchDeleteFiles, renameFile } from "../lib/qiniu";
+import { fetchFiles, fetchBucketDomains, QiniuFile, deleteFile, deleteDirectory, generateDownloadUrl, batchDeleteFiles, renameFile, createFolder } from "../lib/qiniu";
 import { Skeleton } from "./ui/skeleton";
 import {
   File, Image, Film, FileText, Archive,
   Link2, Check, RefreshCw, Trash2, Upload, FolderOpen,
   Folder, ChevronRight, AlertCircle, Database, Download, X, Square, CheckSquare, ArrowUpDown, ArrowUp, ArrowDown, Pencil, ArrowLeft, ArrowRight,
-  HardDrive, FileBox
+  HardDrive, FileBox, Search, FolderPlus
 } from "lucide-react";
 import { toast } from "sonner";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -36,6 +36,20 @@ export function getFileIcon(mimeType: string) {
   if (mimeType?.startsWith('text/')) return <FileText className="w-4 h-4 text-blue-400" />;
   if (mimeType?.includes('zip') || mimeType?.includes('tar') || mimeType?.includes('rar')) return <Archive className="w-4 h-4 text-amber-500" />;
   return <File className="w-4 h-4 text-zinc-400" />;
+}
+
+// ─── Highlight matching text ──────────────────────────────────────────────────
+function HighlightText({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-amber-200 dark:bg-amber-700/60 text-inherit rounded-sm px-0.5">{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -115,8 +129,22 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState("");
 
-  // ── Directory cache ──
-  const dirCache = useRef<Map<string, { items: QiniuFile[]; folders: string[]; nextMarker: string; hasMore: boolean }>>(new Map());
+  // ── Directory cache with timestamp ──
+  const dirCache = useRef<Map<string, { 
+    items: QiniuFile[]; 
+    folders: string[]; 
+    nextMarker: string; 
+    hasMore: boolean;
+    timestamp: number;
+  }>>(new Map());
+  
+  // Get cache expire time from settings
+  const { cacheExpireMinutes } = useAppStore();
+  const CACHE_TTL = cacheExpireMinutes * 60 * 1000;
+  
+  // Refresh throttle to prevent excessive API calls
+  const [lastRefreshTime, setLastRefreshTime] = useState(0);
+  const REFRESH_COOLDOWN = 2000; // 2 seconds
 
   // ── Detail modal state ──
   const [selectedFile, setSelectedFile] = useState<QiniuFile | null>(null);
@@ -135,15 +163,21 @@ export function FileManager({ ak, sk, bucket, onBack }: {
 
   const closeCtxMenu = () => setCtxMenu(null);
 
+  // ── Search state ──
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchActive, setSearchActive] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (ctxMenu) { closeCtxMenu(); return; }
       if (selectedFile) { setSelectedFile(null); return; }
+      if (searchActive) { setSearchQuery(""); setSearchActive(false); return; }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [ctxMenu, selectedFile]);
+  }, [ctxMenu, selectedFile, searchActive]);
 
   // ── Delete state ──
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
@@ -153,6 +187,11 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   // ── Upload state ──
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+
+  // ── Create folder state ──
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   
   // ── Listen to upload/download progress events ──
   useEffect(() => {
@@ -260,6 +299,14 @@ export function FileManager({ ak, sk, bucket, onBack }: {
         case 'PageUp':   e.preventDefault(); el.scrollBy({ top: -el.clientHeight * 0.9, behavior: 'smooth' }); break;
         case 'Home':     e.preventDefault(); el.scrollTo({ top: 0, behavior: 'smooth' }); break;
         case 'End':      e.preventDefault(); el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); break;
+        case 'f':
+        case 'F':
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            setSearchActive(true);
+            setTimeout(() => searchInputRef.current?.focus(), 50);
+          }
+          break;
       }
     };
     window.addEventListener('keydown', handler);
@@ -381,24 +428,47 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     }
   };
 
-  // ─── Load domain list once ───────────────────────────────────────────────
+  // ─── Load domain list once with cache ───────────────────────────────────────────────
   useEffect(() => {
-    fetchBucketDomains(ak, sk, bucket).then(setDomains).catch(() => setDomains([]));
+    const { getBucketDomains, setBucketDomains } = useAppStore.getState();
+    
+    // Check cache first
+    const cached = getBucketDomains(bucket);
+    if (cached) {
+      setDomains(cached);
+      return;
+    }
+    
+    // Fetch from API
+    fetchBucketDomains(ak, sk, bucket)
+      .then(domains => {
+        setDomains(domains);
+        setBucketDomains(bucket, domains);
+      })
+      .catch(() => setDomains([]));
   }, [ak, sk, bucket]);
 
   // ─── Load files whenever prefix changes ──────────────────────────────────
   const loadDirectory = useCallback(async (prefix: string, forceRefresh = false) => {
-    // Check cache first
+    // Check cache first with expiration
     if (!forceRefresh && dirCache.current.has(prefix)) {
       const cached = dirCache.current.get(prefix)!;
-      setItems(cached.items);
-      setFolders(cached.folders);
-      setNextMarker(cached.nextMarker);
-      setHasMore(cached.hasMore);
-      setLoading(false);
-      setError("");
-      setSelectedKeys(new Set());
-      return;
+      const isExpired = Date.now() - cached.timestamp > CACHE_TTL;
+      
+      if (!isExpired) {
+        // Use cached data
+        setItems(cached.items);
+        setFolders(cached.folders);
+        setNextMarker(cached.nextMarker);
+        setHasMore(cached.hasMore);
+        setLoading(false);
+        setError("");
+        setSelectedKeys(new Set());
+        return;
+      } else {
+        // Cache expired, remove it
+        dirCache.current.delete(prefix);
+      }
     }
 
     setLoading(true);
@@ -419,13 +489,19 @@ export function FileManager({ ak, sk, bucket, onBack }: {
       setFolders(newFolders);
       setNextMarker(newMarker);
       setHasMore(newHasMore);
-      dirCache.current.set(prefix, { items: newItems, folders: newFolders, nextMarker: newMarker, hasMore: newHasMore });
+      dirCache.current.set(prefix, { 
+        items: newItems, 
+        folders: newFolders, 
+        nextMarker: newMarker, 
+        hasMore: newHasMore,
+        timestamp: Date.now()
+      });
     } catch (err: any) {
       setError(err.message || "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [ak, sk, bucket]);
+  }, [ak, sk, bucket, CACHE_TTL]);
 
   // ─── Load more (next page) ────────────────────────────────────────────────
   const loadMore = useCallback(async () => {
@@ -446,12 +522,13 @@ export function FileManager({ ak, sk, bucket, onBack }: {
       });
       setNextMarker(newMarker);
       setHasMore(newHasMore);
-      // Update cache
+      // Update cache with timestamp
       dirCache.current.set(currentPrefix, {
         items: [...items, ...moreItems],
         folders: [...new Set([...folders, ...moreFolders])],
         nextMarker: newMarker,
         hasMore: newHasMore,
+        timestamp: Date.now()
       });
     } catch (err: any) {
       toast.error("加载更多失败", { description: err.message });
@@ -462,6 +539,8 @@ export function FileManager({ ak, sk, bucket, onBack }: {
 
   useEffect(() => {
     loadDirectory(currentPrefix);
+    setSearchQuery("");   // clear search when navigating
+    setSearchActive(false);
   }, [currentPrefix, loadDirectory]);
 
   // ─── Derived entries for current level ───────────────────────────────────
@@ -486,17 +565,27 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   const allSelected = allFileKeys.length > 0 && allFileKeys.every(k => selectedKeys.has(k));
 
   const sortedEntries = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     const folders = entries.filter(e => e.type === 'folder');
     const files = entries.filter(e => e.type === 'file') as { type: 'file'; name: string; file: QiniuFile }[];
-    const sorted = [...files].sort((a, b) => {
+    
+    // Apply search filter
+    const filteredFolders = q
+      ? folders.filter(e => e.name.toLowerCase().includes(q))
+      : folders;
+    const filteredFiles = q
+      ? files.filter(e => e.name.toLowerCase().includes(q))
+      : files;
+    
+    const sorted = [...filteredFiles].sort((a, b) => {
       let cmp = 0;
       if (sortField === 'name') cmp = a.name.localeCompare(b.name);
       else if (sortField === 'size') cmp = a.file.fsize - b.file.fsize;
       else if (sortField === 'time') cmp = a.file.putTime - b.file.putTime;
       return sortDir === 'asc' ? cmp : -cmp;
     });
-    return [...folders, ...sorted];
-  }, [entries, sortField, sortDir]);
+    return [...filteredFolders, ...sorted];
+  }, [entries, sortField, sortDir, searchQuery]);
 
   // ── Auto load more on scroll to bottom ──
   useEffect(() => {
@@ -577,11 +666,39 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     setPanelOpen(true);
     
     try {
-      // Fetch all files in the folder
-      const res = await fetchFiles(ak, sk, bucket, folderPrefix, "", 10000);
-      const folderFiles = res.items || [];
+      // Fetch all files in the folder with pagination
+      let allFiles: QiniuFile[] = [];
+      let marker = "";
+      let hasMore = true;
+      const MAX_FILES = 10000;
       
-      if (folderFiles.length === 0) {
+      // Show loading toast
+      const loadingToast = toast.loading('正在获取文件夹内容...');
+      
+      while (hasMore && allFiles.length < MAX_FILES) {
+        const res = await fetchFiles(ak, sk, bucket, folderPrefix, marker, 1000);
+        const newFiles = res.items || [];
+        allFiles = [...allFiles, ...newFiles];
+        marker = res.marker || "";
+        hasMore = !!res.marker;
+        
+        // Update loading message
+        toast.loading(`已获取 ${allFiles.length} 个文件...`, { id: loadingToast });
+        
+        // Safety check
+        if (allFiles.length >= MAX_FILES && hasMore) {
+          toast.dismiss(loadingToast);
+          const confirmed = confirm(
+            `该文件夹包含超过 ${MAX_FILES} 个文件，下载可能需要很长时间。\n\n是否继续下载？`
+          );
+          if (!confirmed) return;
+          break;
+        }
+      }
+      
+      toast.dismiss(loadingToast);
+      
+      if (allFiles.length === 0) {
         toast.info('文件夹为空');
         return;
       }
@@ -591,7 +708,7 @@ export function FileManager({ ak, sk, bucket, onBack }: {
       
       // Create download items with folder name + relative paths
       // Filter out items that end with '/' (they are folders, not files)
-      const batchItems: [string, string][] = folderFiles
+      const batchItems: [string, string][] = allFiles
         .filter(file => !file.key.endsWith('/'))
         .map(file => [
           generateDownloadUrl(ak, sk, domains[0], file.key),
@@ -601,6 +718,15 @@ export function FileManager({ ak, sk, bucket, onBack }: {
       if (batchItems.length === 0) {
         toast.info('文件夹中没有文件');
         return;
+      }
+      
+      // Show confirmation for large downloads
+      if (batchItems.length > 100) {
+        const totalSize = allFiles.reduce((sum, f) => sum + f.fsize, 0);
+        const confirmed = confirm(
+          `即将下载 ${batchItems.length} 个文件，总大小约 ${formatBytes(totalSize)}。\n\n是否继续？`
+        );
+        if (!confirmed) return;
       }
       
       const result: { downloaded: string[]; failed: string[] } = await invoke('download_files_to_dir', { items: batchItems, dir });
@@ -642,6 +768,33 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   };
 
   // ─── Upload ──────────────────────────────────────────────────────────────
+  const handleCreateFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+
+    // 校验：不能包含非法字符
+    if (name.includes('/')) {
+      toast.error('文件夹名称不能包含 /');
+      return;
+    }
+
+    // 获取 bucket 的 region
+    const region = bucketInfo?.region || 'z0'; // 默认华东
+    const folderKey = currentPrefix + name + '/';
+    setIsCreatingFolder(true);
+    try {
+      await createFolder(ak, sk, bucket, region, folderKey);
+      toast.success(`文件夹 "${name}" 创建成功`);
+      setShowCreateFolder(false);
+      setNewFolderName("");
+      loadDirectory(currentPrefix, true);
+    } catch (err: any) {
+      toast.error('创建文件夹失败', { description: err.message });
+    } finally {
+      setIsCreatingFolder(false);
+    }
+  };
+
   const handleUpload = async (directory: boolean) => {
     try {
       const selected = await open({
@@ -678,9 +831,15 @@ export function FileManager({ ak, sk, bucket, onBack }: {
       toast.success("文件已删除", { description: key });
       const newItems = items.filter(f => f.key !== key);
       setItems(newItems);
-      // Update cache
+      // Update cache with timestamp
       if (dirCache.current.has(currentPrefix)) {
-        dirCache.current.set(currentPrefix, { items: newItems, folders, nextMarker, hasMore });
+        dirCache.current.set(currentPrefix, { 
+          items: newItems, 
+          folders, 
+          nextMarker, 
+          hasMore,
+          timestamp: Date.now()
+        });
       }
       setFileToDelete(null);
     } catch (err: any) {
@@ -844,12 +1003,30 @@ export function FileManager({ ak, sk, bucket, onBack }: {
             </span>
           )}
           <button
-            onClick={() => loadDirectory(currentPrefix, true)}
+            onClick={() => {
+              const now = Date.now();
+              if (now - lastRefreshTime < REFRESH_COOLDOWN) {
+                toast.info('刷新太频繁，请稍后再试');
+                return;
+              }
+              setLastRefreshTime(now);
+              loadDirectory(currentPrefix, true);
+            }}
             disabled={loading}
             title="刷新"
             className="p-2 rounded-lg text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            onClick={() => {
+              setSearchActive(true);
+              setTimeout(() => searchInputRef.current?.focus(), 50);
+            }}
+            title="搜索 (Ctrl+F)"
+            className={`p-2 rounded-lg transition-colors ${searchActive || searchQuery ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'}`}
+          >
+            <Search className="w-4 h-4" />
           </button>
           <button
             onClick={() => handleUpload(false)}
@@ -869,9 +1046,47 @@ export function FileManager({ ak, sk, bucket, onBack }: {
             <FolderOpen className="w-4 h-4" />
             上传文件夹
           </button>
+          <button
+            onClick={() => { setShowCreateFolder(true); setNewFolderName(""); }}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 rounded-lg transition-all disabled:opacity-50 disabled:pointer-events-none"
+            title="新建文件夹"
+          >
+            <FolderPlus className="w-4 h-4" />
+            新建文件夹
+          </button>
         </div>
         )}
       </div>
+
+      {/* ── Search Bar ── */}
+      {searchActive && (
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/40 shrink-0">
+          <Search className="w-4 h-4 text-zinc-400 shrink-0" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="搜索当前目录文件名..."
+            className="flex-1 bg-transparent text-sm text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 outline-none"
+            onKeyDown={e => {
+              if (e.key === 'Escape') { setSearchQuery(""); setSearchActive(false); }
+            }}
+          />
+          {searchQuery && (
+            <span className="text-xs text-zinc-400 tabular-nums shrink-0">
+              {sortedEntries.length} 个结果
+            </span>
+          )}
+          <button
+            onClick={() => { setSearchQuery(""); setSearchActive(false); }}
+            className="p-1 rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shrink-0"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* ── Content ── */}
       <div className="flex-1 overflow-hidden relative">
@@ -965,7 +1180,9 @@ export function FileManager({ ak, sk, bucket, onBack }: {
                       <div className="pl-4 w-10 shrink-0" />
                       <div className="flex-1 pl-1 flex items-center gap-3 min-w-0">
                         <Folder className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span className="font-medium text-zinc-700 dark:text-zinc-200 truncate">{entry.name}</span>
+                        <span className="font-medium text-zinc-700 dark:text-zinc-200 truncate">
+                          <HighlightText text={entry.name} query={searchQuery} />
+                        </span>
                       </div>
                       <div className="w-28 shrink-0 text-zinc-400">—</div>
                       <div className="w-52 shrink-0 hidden md:block">
@@ -1020,7 +1237,9 @@ export function FileManager({ ak, sk, bucket, onBack }: {
                           className="flex-1 max-w-[220px] px-2 py-0.5 text-sm rounded border border-emerald-400 dark:border-emerald-600 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-emerald-400/40"
                         />
                       ) : (
-                        <span className="truncate max-w-[240px] text-zinc-700 dark:text-zinc-200" title={file.key}>{entry.name}</span>
+                        <span className="truncate max-w-[240px] text-zinc-700 dark:text-zinc-200" title={file.key}>
+                          <HighlightText text={entry.name} query={searchQuery} />
+                        </span>
                       )}
                     </div>
                     <div className="w-28 shrink-0 font-mono text-xs tabular-nums text-zinc-500">{formatBytes(file.fsize)}</div>
@@ -1191,6 +1410,57 @@ export function FileManager({ ak, sk, bucket, onBack }: {
           </>
         )}
       </div>
+
+      {/* ── Create Folder Modal ── */}
+      {showCreateFolder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-zinc-900 w-full max-w-sm rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-6 mx-4">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
+                <FolderPlus className="w-5 h-5 text-amber-500" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">新建文件夹</h3>
+                {currentPrefix && (
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5 truncate max-w-[220px]">
+                    位置：{currentPrefix}
+                  </p>
+                )}
+              </div>
+            </div>
+            <input
+              autoFocus
+              type="text"
+              value={newFolderName}
+              onChange={e => setNewFolderName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleCreateFolder();
+                if (e.key === 'Escape') { setShowCreateFolder(false); setNewFolderName(""); }
+              }}
+              placeholder="输入文件夹名称"
+              className="w-full px-3 py-2 text-sm text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 mb-5"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setShowCreateFolder(false); setNewFolderName(""); }}
+                disabled={isCreatingFolder}
+                className="flex-1 px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl transition-colors disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleCreateFolder}
+                disabled={isCreatingFolder || !newFolderName.trim()}
+                className="flex-1 px-4 py-2 text-sm font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-xl transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isCreatingFolder
+                  ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />创建中...</>
+                  : '确认创建'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Delete Modal ── */}
       {(fileToDelete || dirToDelete) && (

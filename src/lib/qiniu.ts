@@ -348,6 +348,68 @@ export async function renameFile(
   if (!response.ok) throw await parseQiniuError(response, "重命名失败");
 }
 
+/**
+ * 根据区域代码获取上传域名
+ */
+function getUploadDomain(region: string): string {
+  const domainMap: Record<string, string> = {
+    'z0': 'up.qiniup.com',           // 华东
+    'cn-east-1': 'up.qiniup.com',    // 华东
+    'z1': 'up-z1.qiniup.com',        // 华北
+    'cn-north-1': 'up-z1.qiniup.com', // 华北
+    'z2': 'up-z2.qiniup.com',        // 华南
+    'cn-south-1': 'up-z2.qiniup.com', // 华南
+    'na0': 'up-na0.qiniup.com',      // 北美
+    'us-north-1': 'up-na0.qiniup.com', // 北美
+    'as0': 'up-as0.qiniup.com',      // 东南亚
+    'ap-southeast-1': 'up-as0.qiniup.com', // 东南亚
+    'cn-east-2': 'up-cn-east-2.qiniup.com', // 华东-浙江2
+    'fog-cn-east-1': 'up-fog-cn-east-1.qiniup.com', // 华东-雾存储
+  };
+  return domainMap[region] || 'up.qiniup.com'; // 默认华东
+}
+
+/**
+ * 创建虚拟文件夹
+ * 七牛云没有真正的文件夹概念，通过上传一个 key 以 "/" 结尾的空文件来模拟
+ * 使用上传凭证 + 直接 POST 到上传域名
+ */
+export async function createFolder(
+  ak: string,
+  sk: string,
+  bucket: string,
+  region: string,  // 新增：bucket 的区域
+  folderKey: string  // 必须以 "/" 结尾，例如 "photos/2024/"
+): Promise<void> {
+  // 生成上传凭证 (Upload Token)
+  // scope: bucket:key 限定只能上传这个 key
+  const scope = `${bucket}:${folderKey}`;
+  const deadline = Math.floor(Date.now() / 1000) + 3600; // 1小时有效
+  const putPolicy = JSON.stringify({ scope, deadline });
+  const encodedPolicy = urlSafeBase64Encode(putPolicy);
+  const sign = CryptoJS.HmacSHA1(encodedPolicy, sk);
+  const encodedSign = urlSafeBase64Encode(sign);
+  const uploadToken = `${ak}:${encodedSign}:${encodedPolicy}`;
+
+  // 根据区域选择正确的上传域名
+  const uploadDomain = getUploadDomain(region);
+
+  // 上传空文件到七牛云上传域名
+  const formData = new FormData();
+  formData.append("token", uploadToken);
+  formData.append("key", folderKey);
+  formData.append("file", new Blob([]), folderKey); // 空文件
+
+  const response = await tauriFetch(`https://${uploadDomain}`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw await parseQiniuError(response, "创建文件夹失败");
+  }
+}
+
 export async function deleteDirectory(ak: string, sk: string, bucket: string, prefix: string): Promise<void> {
   let marker = "";
   while (true) {

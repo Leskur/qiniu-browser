@@ -22,6 +22,11 @@ interface AppState {
   cacheExpireMinutes: number;
   setCacheExpireMinutes: (minutes: number) => void;
   
+  // 域名缓存
+  bucketDomains: Map<string, { domains: string[]; timestamp: number }>;
+  setBucketDomains: (bucket: string, domains: string[]) => void;
+  getBucketDomains: (bucket: string) => string[] | null;
+  
   // 通知设置
   notifyOnComplete: boolean;
   setNotifyOnComplete: (notify: boolean) => void;
@@ -83,6 +88,34 @@ export const useAppStore = create<AppState>()(
       // 缓存设置
       cacheExpireMinutes: 5,
       setCacheExpireMinutes: (minutes) => set({ cacheExpireMinutes: minutes }),
+      
+      // 域名缓存（1小时过期）
+      bucketDomains: new Map(),
+      setBucketDomains: (bucket, domains) => {
+        set((state) => {
+          const newMap = new Map(state.bucketDomains);
+          newMap.set(bucket, { domains, timestamp: Date.now() });
+          return { bucketDomains: newMap };
+        });
+      },
+      getBucketDomains: (bucket) => {
+        const cached = get().bucketDomains.get(bucket);
+        if (!cached) return null;
+        
+        // Check if expired (1 hour)
+        const DOMAIN_CACHE_TTL = 60 * 60 * 1000;
+        if (Date.now() - cached.timestamp > DOMAIN_CACHE_TTL) {
+          // Expired, remove from cache
+          set((state) => {
+            const newMap = new Map(state.bucketDomains);
+            newMap.delete(bucket);
+            return { bucketDomains: newMap };
+          });
+          return null;
+        }
+        
+        return cached.domains;
+      },
       
       // 通知设置
       notifyOnComplete: true,
