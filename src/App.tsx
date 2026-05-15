@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { Toaster, toast } from "sonner";
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { getVersion } from '@tauri-apps/api/app';
+import { open } from '@tauri-apps/plugin-shell';
 import { Login } from "./components/Login";
 import { FileManager } from "./components/FileManager";
 import { BucketList } from "./components/BucketList";
@@ -12,7 +14,7 @@ import { fetchBuckets, QiniuBucket } from "./lib/qiniu";
 import { useAppStore, Theme } from "./store";
 import {
   Database, Zap, LogOut, Settings,
-  Sun, Moon, Monitor
+  Sun, Moon, Monitor, Cat, Download
 } from "lucide-react";
 import "./App.css";
 
@@ -25,100 +27,114 @@ const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "跟随系统", icon: Monitor },
 ];
 
-function SettingsPanel() {
+function SettingsPanel({ onCheckUpdate }: { onCheckUpdate: () => void }) {
   const { 
     theme, setTheme,
     itemsPerPage, setItemsPerPage,
     cacheExpireMinutes, setCacheExpireMinutes,
-    notifyOnComplete, setNotifyOnComplete,
   } = useAppStore();
   
   const [cacheSize, setCacheSize] = useState<string>('计算中...');
+  const [appVersion, setAppVersion] = useState<string>('...');
+  const [confirmClear, setConfirmClear] = useState(false);
 
-  // 计算缓存大小
-  useEffect(() => {
+  const calcCacheSize = () => {
     try {
       let totalSize = 0;
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key) {
           const value = localStorage.getItem(key);
-          if (value) {
-            totalSize += key.length + value.length;
-          }
+          if (value) totalSize += key.length + value.length;
         }
       }
-      // 转换为 KB
       setCacheSize(`${(totalSize / 1024).toFixed(2)} KB`);
     } catch {
       setCacheSize('无法计算');
     }
+  };
+
+  useEffect(() => {
+    calcCacheSize();
+    getVersion().then(v => setAppVersion(v)).catch(() => setAppVersion('未知'));
   }, []);
 
   const handleClearCache = () => {
-    if (confirm('确定要清除所有缓存吗？这将清除目录缓存和域名缓存，但不会清除您的设置。')) {
-      // 保存设置相关的 key
-      const settingsKeys = ['qiniu-browser-settings', 'qiniu_auto_login', 'qiniu_last_login_ak'];
-      const settingsData: Record<string, string> = {};
-      
-      settingsKeys.forEach(key => {
-        const value = localStorage.getItem(key);
-        if (value) settingsData[key] = value;
-      });
-      
-      // 清除所有
-      localStorage.clear();
-      
-      // 恢复设置
-      Object.entries(settingsData).forEach(([key, value]) => {
-        localStorage.setItem(key, value);
-      });
-      
-      toast.success('缓存已清除');
-      setCacheSize('0 KB');
+    if (!confirmClear) {
+      setConfirmClear(true);
+      // 3 秒后自动取消确认状态
+      setTimeout(() => setConfirmClear(false), 3000);
+      return;
     }
+    // 保存设置相关的 key
+    const settingsKeys = ['qiniu-browser-settings', 'qiniu_auto_login', 'qiniu_last_login_ak', 'qiniu_session'];
+    const settingsData: Record<string, string> = {};
+    settingsKeys.forEach(key => {
+      const value = localStorage.getItem(key);
+      if (value) settingsData[key] = value;
+    });
+    localStorage.clear();
+    Object.entries(settingsData).forEach(([key, value]) => {
+      localStorage.setItem(key, value);
+    });
+    toast.success('缓存已清除');
+    setConfirmClear(false);
+    calcCacheSize();
   };
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center gap-3 px-6 py-3.5 border-b border-zinc-200 dark:border-zinc-800 shrink-0 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm">
+      <div className="flex items-center justify-between px-6 py-3.5 border-b border-zinc-200 dark:border-zinc-800 shrink-0 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm">
         <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-200">设置</h2>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => open('https://github.com/Leskur/qiniu-browser')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+            title="访问 GitHub 仓库"
+          >
+            <Cat className="w-3.5 h-3.5" />
+            <span>GitHub</span>
+          </button>
+          <button
+            onClick={onCheckUpdate}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors cursor-pointer"
+            title="检查应用更新"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>检查更新</span>
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-8">
-        {/* 外观设置 */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* 外观 */}
         <div>
-          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">外观设置</h3>
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-2 block">主题</label>
-              <div className="grid grid-cols-3 gap-3">
-                {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
-                  <button
-                    key={value}
-                    onClick={() => setTheme(value)}
-                    className={`flex flex-col items-center gap-2.5 p-4 rounded-xl border-2 transition-all cursor-pointer
-                      ${theme === value
-                        ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 shadow-sm"
-                        : "border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-600"}`}
-                  >
-                    <Icon className={`w-6 h-6 ${theme === value ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"}`} />
-                    <span className={`text-xs font-medium ${theme === value ? "text-emerald-700 dark:text-emerald-300" : "text-zinc-500 dark:text-zinc-400"}`}>
-                      {label}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
+          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">外观</h3>
+          <div className="grid grid-cols-3 gap-3">
+            {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+              <button
+                key={value}
+                onClick={() => setTheme(value)}
+                className={`flex flex-col items-center gap-2 p-3 rounded-lg border transition-all cursor-pointer
+                  ${theme === value
+                    ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20"
+                    : "border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600"}`}
+              >
+                <Icon className={`w-5 h-5 ${theme === value ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"}`} />
+                <span className={`text-xs font-medium ${theme === value ? "text-emerald-700 dark:text-emerald-300" : "text-zinc-500 dark:text-zinc-400"}`}>
+                  {label}
+                </span>
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* 文件管理设置 */}
+        {/* 文件管理 */}
         <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800">
           <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">文件管理</h3>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div>
-              <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-2 block">每页显示数量</label>
+              <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-2 block">每页显示</label>
               <div className="grid grid-cols-4 gap-2">
                 {[20, 50, 100, 200].map((count) => (
                   <button
@@ -126,24 +142,23 @@ function SettingsPanel() {
                     onClick={() => setItemsPerPage(count as any)}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer
                       ${itemsPerPage === count
-                        ? "bg-emerald-500 text-white shadow-sm"
+                        ? "bg-emerald-500 text-white"
                         : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"}`}
                   >
                     {count}
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">较大的数值可能影响性能</p>
             </div>
           </div>
         </div>
 
-        {/* 缓存设置 */}
+        {/* 缓存 */}
         <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800">
-          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">缓存设置</h3>
-          <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">缓存</h3>
+          <div className="space-y-3">
             <div>
-              <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-2 block">缓存过期时间</label>
+              <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-2 block">过期时间</label>
               <div className="grid grid-cols-4 gap-2">
                 {[1, 5, 15, 30].map((minutes) => (
                   <button
@@ -151,74 +166,41 @@ function SettingsPanel() {
                     onClick={() => setCacheExpireMinutes(minutes)}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer
                       ${cacheExpireMinutes === minutes
-                        ? "bg-emerald-500 text-white shadow-sm"
+                        ? "bg-emerald-500 text-white"
                         : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"}`}
                   >
                     {minutes}分钟
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">目录列表缓存的有效期</p>
             </div>
             
-            <div className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg">
+            <div className="flex items-center justify-between pt-2">
               <div>
-                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">当前缓存大小</p>
+                <p className="text-sm text-zinc-700 dark:text-zinc-300">当前大小</p>
                 <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">{cacheSize}</p>
               </div>
               <button
                 onClick={handleClearCache}
-                className="px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors"
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
+                  confirmClear
+                    ? 'text-white bg-red-500 hover:bg-red-600'
+                    : 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
+                }`}
               >
-                清除缓存
+                {confirmClear ? '确认清除' : '清除'}
               </button>
             </div>
-          </div>
-        </div>
-
-        {/* 通知设置 */}
-        <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800">
-          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">通知设置</h3>
-          <div className="space-y-3">
-            <label className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-              <div>
-                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">传输完成通知</p>
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">上传或下载完成时显示通知</p>
-              </div>
-              <input
-                type="checkbox"
-                checked={notifyOnComplete}
-                onChange={(e) => setNotifyOnComplete(e.target.checked)}
-                className="w-4 h-4 text-emerald-600 bg-zinc-100 border-zinc-300 rounded focus:ring-emerald-500 dark:focus:ring-emerald-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
-              />
-            </label>
           </div>
         </div>
 
         {/* 关于 */}
         <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800">
           <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-3">关于</h3>
-          <div className="space-y-3">
-            <div className="p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg">
-              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Qiniu Browser</p>
-              <p className="text-xs font-mono text-zinc-400 dark:text-zinc-500 mt-1">版本 v0.0.1</p>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">基于 Tauri + React 构建的七牛云桌面客户端</p>
-            </div>
-            
-            <div className="flex gap-2">
-              <button
-                onClick={() => window.open('https://github.com/YOUR_USERNAME/qiniu-browser', '_blank')}
-                className="flex-1 px-3 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg transition-colors"
-              >
-                GitHub
-              </button>
-              <button
-                onClick={() => toast.info('当前已是最新版本')}
-                className="flex-1 px-3 py-2 text-sm font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-lg transition-colors"
-              >
-                检查更新
-              </button>
-            </div>
+          <div className="text-sm text-zinc-600 dark:text-zinc-400 space-y-1">
+            <p className="font-medium text-zinc-700 dark:text-zinc-300">Qiniu Browser</p>
+            <p className="text-xs font-mono text-zinc-400 dark:text-zinc-500">v{appVersion}</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">基于 Tauri + React 构建</p>
           </div>
         </div>
       </div>
@@ -227,20 +209,43 @@ function SettingsPanel() {
 }
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [credentials, setCredentials] = useState({ ak: "", sk: "", description: "" });
+  // 从 localStorage 恢复登录状态
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    const saved = localStorage.getItem('qiniu_session');
+    return saved ? JSON.parse(saved).isAuthenticated : false;
+  });
+  
+  const [credentials, setCredentials] = useState(() => {
+    const saved = localStorage.getItem('qiniu_session');
+    return saved ? JSON.parse(saved).credentials : { ak: "", sk: "", description: "" };
+  });
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<Section>("storage");
   const [cdnSubSection, setCdnSubSection] = useState<CdnSubSection>("refresh");
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
+  const [prefillDomain, setPrefillDomain] = useState<string>("");
   const [sidebarWidth, setSidebarWidth] = useState(208);
   const [isResizing, setIsResizing] = useState(false);
   const [memoryMB, setMemoryMB] = useState<number | null>(null);
   const [bucketListScrollPos, setBucketListScrollPos] = useState(0);
 
   const { buckets, setBuckets } = useAppStore();
+  
+  // 持久化登录状态
+  useEffect(() => {
+    if (isAuthenticated && credentials.ak && credentials.sk) {
+      localStorage.setItem('qiniu_session', JSON.stringify({
+        isAuthenticated,
+        credentials
+      }));
+    } else {
+      localStorage.removeItem('qiniu_session');
+    }
+  }, [isAuthenticated, credentials]);
 
   // ── Memory usage polling ──
   useEffect(() => {
@@ -279,36 +284,39 @@ function App() {
   }, [isAuthenticated]);
 
   // 检查更新
-  useEffect(() => {
-    async function checkForUpdates() {
-      try {
-        const update = await check();
-        if (update?.available) {
-          toast.info(`发现新版本 ${update.version}`, {
-            description: '是否立即更新？',
-            action: {
-              label: '立即更新',
-              onClick: async () => {
-                try {
-                  toast.loading('正在下载更新...');
-                  await update.downloadAndInstall();
-                  await relaunch();
-                } catch (error) {
-                  toast.error('更新失败', {
-                    description: error instanceof Error ? error.message : '未知错误'
-                  });
-                }
+  const checkForUpdates = async (manual = false) => {
+    try {
+      const update = await check();
+      if (update?.available) {
+        toast.info(`发现新版本 ${update.version}`, {
+          description: '是否立即更新？',
+          action: {
+            label: '立即更新',
+            onClick: async () => {
+              try {
+                toast.loading('正在下载更新...');
+                await update.downloadAndInstall();
+                await relaunch();
+              } catch (error) {
+                toast.error('更新失败', {
+                  description: error instanceof Error ? error.message : '未知错误'
+                });
               }
-            },
-            duration: 10000,
-          });
-        }
-      } catch (error) {
-        console.error('检查更新失败:', error);
+            }
+          },
+          duration: 10000,
+        });
+      } else if (manual) {
+        toast.success('当前已是最新版本');
       }
+    } catch (error) {
+      console.error('检查更新失败:', error);
+      if (manual) toast.error('检查更新失败', { description: '请检查网络连接' });
     }
-    
-    checkForUpdates();
+  };
+
+  useEffect(() => {
+    checkForUpdates(false);
   }, []);
 
   const handleLogout = () => {
@@ -317,6 +325,8 @@ function App() {
     setSelectedBucket(null);
     setActiveSection("storage");
     setShowAccountMenu(false);
+    setBuckets([]); // 清空 buckets
+    localStorage.removeItem('qiniu_session'); // 清除会话
   };
 
   // 侧边栏拖拽调整宽度
@@ -531,7 +541,7 @@ function App() {
                 <div className="flex items-center gap-2 px-6 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm shrink-0">
                   <button
                     onClick={() => setCdnSubSection("refresh")}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${
+                    className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all cursor-pointer ${
                       cdnSubSection === "refresh"
                         ? "bg-emerald-500 text-white shadow-sm"
                         : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -541,7 +551,7 @@ function App() {
                   </button>
                   <button
                     onClick={() => setCdnSubSection("domains")}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${
+                    className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all cursor-pointer ${
                       cdnSubSection === "domains"
                         ? "bg-emerald-500 text-white shadow-sm"
                         : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -553,12 +563,30 @@ function App() {
                 
                 {/* CDN Content */}
                 <div className="flex-1 overflow-hidden">
-                  {cdnSubSection === "refresh" && <CdnManager ak={credentials.ak} sk={credentials.sk} />}
-                  {cdnSubSection === "domains" && <DomainManager ak={credentials.ak} sk={credentials.sk} />}
+                  {cdnSubSection === "refresh" && (
+                    <CdnManager 
+                      ak={credentials.ak} 
+                      sk={credentials.sk}
+                      prefillDomain={prefillDomain}
+                      onPrefillUsed={() => setPrefillDomain("")}
+                    />
+                  )}
+                  {cdnSubSection === "domains" && (
+                    <DomainManager 
+                      ak={credentials.ak} 
+                      sk={credentials.sk}
+                      selectedDomain={selectedDomain}
+                      onSelectDomain={setSelectedDomain}
+                      onRefreshDomain={(domain) => {
+                        setPrefillDomain(domain);
+                        setCdnSubSection("refresh");
+                      }}
+                    />
+                  )}
                 </div>
               </div>
               <div className={activeSection === "settings" ? "h-full" : "hidden"}>
-                <SettingsPanel />
+                <SettingsPanel onCheckUpdate={() => checkForUpdates(true)} />
               </div>
             </div>
           </div>

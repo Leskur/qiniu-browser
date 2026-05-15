@@ -6,7 +6,7 @@ import {
   File, Image, Film, FileText, Archive,
   Link2, Check, RefreshCw, Trash2, Upload, FolderOpen,
   Folder, ChevronRight, AlertCircle, Database, Download, X, Square, CheckSquare, ArrowUpDown, ArrowUp, ArrowDown, Pencil, ArrowLeft, ArrowRight,
-  HardDrive, FileBox, Search, FolderPlus
+  HardDrive, FileBox, Search, FolderPlus, ZoomIn, ChevronLeft, Maximize2
 } from "lucide-react";
 import { toast } from "sonner";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -139,7 +139,7 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   }>>(new Map());
   
   // Get cache expire time from settings
-  const { cacheExpireMinutes } = useAppStore();
+  const { cacheExpireMinutes, itemsPerPage } = useAppStore();
   const CACHE_TTL = cacheExpireMinutes * 60 * 1000;
   
   // Refresh throttle to prevent excessive API calls
@@ -148,6 +148,34 @@ export function FileManager({ ak, sk, bucket, onBack }: {
 
   // ── Detail modal state ──
   const [selectedFile, setSelectedFile] = useState<QiniuFile | null>(null);
+
+  // ── Image preview state ──
+  const [previewFile, setPreviewFile] = useState<QiniuFile | null>(null);
+
+  // 所有图片文件列表（用于前后导航）
+  const imageFiles = useMemo(() =>
+    items.filter(f => f.mimeType?.startsWith('image/')),
+    [items]
+  );
+
+  const openPreview = (file: QiniuFile) => {
+    if (!file.mimeType?.startsWith('image/')) return;
+    setPreviewFile(file);
+  };
+
+  const closePreview = () => setPreviewFile(null);
+
+  const previewPrev = useCallback(() => {
+    if (!previewFile) return;
+    const idx = imageFiles.findIndex(f => f.key === previewFile.key);
+    if (idx > 0) setPreviewFile(imageFiles[idx - 1]);
+  }, [previewFile, imageFiles]);
+
+  const previewNext = useCallback(() => {
+    if (!previewFile) return;
+    const idx = imageFiles.findIndex(f => f.key === previewFile.key);
+    if (idx < imageFiles.length - 1) setPreviewFile(imageFiles[idx + 1]);
+  }, [previewFile, imageFiles]);
 
   // ── Context menu ──
   const [ctxMenu, setCtxMenu] = useState<{ file: QiniuFile; x: number; y: number } | null>(null);
@@ -171,13 +199,14 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (previewFile) { closePreview(); return; }
       if (ctxMenu) { closeCtxMenu(); return; }
       if (selectedFile) { setSelectedFile(null); return; }
       if (searchActive) { setSearchQuery(""); setSearchActive(false); return; }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [ctxMenu, selectedFile, searchActive]);
+  }, [ctxMenu, selectedFile, searchActive, previewFile]);
 
   // ── Delete state ──
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
@@ -290,6 +319,12 @@ export function FileManager({ ak, sk, bucket, onBack }: {
   // ── Keyboard scroll shortcuts (PgUp/PgDn/Home/End) ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // 图片预览模式下的键盘导航
+      if (previewFile) {
+        if (e.key === 'ArrowLeft') { e.preventDefault(); previewPrev(); }
+        if (e.key === 'ArrowRight') { e.preventDefault(); previewNext(); }
+        return;
+      }
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       const el = scrollContainerRef.current;
@@ -311,7 +346,7 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [previewFile, previewPrev, previewNext]);
 
   // ── Sort state ──
   type SortField = 'name' | 'size' | 'time';
@@ -479,7 +514,7 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     setHasMore(false);
     setSelectedKeys(new Set());
     try {
-      const res = await fetchFiles(ak, sk, bucket, prefix, "", 50, "/");
+      const res = await fetchFiles(ak, sk, bucket, prefix, "", itemsPerPage, "/");
       // 过滤掉文件夹占位符（key 以 / 结尾的空文件）
       const newItems = (res.items || []).filter(item => !item.key.endsWith('/'));
       const newFolders = res.commonPrefixes || [];
@@ -509,7 +544,7 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     if (!hasMore || loadingMore || !nextMarker) return;
     setLoadingMore(true);
     try {
-      const res = await fetchFiles(ak, sk, bucket, currentPrefix, nextMarker, 50, "/");
+      const res = await fetchFiles(ak, sk, bucket, currentPrefix, nextMarker, itemsPerPage, "/");
       // 过滤掉文件夹占位符（key 以 / 结尾的空文件）
       const moreItems = (res.items || []).filter(item => !item.key.endsWith('/'));
       const moreFolders = res.commonPrefixes || [];
@@ -1216,6 +1251,7 @@ export function FileManager({ ak, sk, bucket, onBack }: {
                     key={`f:${file.key}`}
                     style={rowStyle}
                     onClick={() => !someSelected && !isRenaming && setSelectedFile(file)}
+                    onDoubleClick={() => !isRenaming && openPreview(file)}
                     onContextMenu={(e) => openCtxMenu(e, file)}
                     className={`group flex items-center cursor-pointer border-b border-zinc-100 dark:border-zinc-800/60 transition-colors text-sm
                       ${isChecked ? 'bg-emerald-50/60 dark:bg-emerald-900/10 hover:bg-emerald-50 dark:hover:bg-emerald-900/20' : 'hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30'}
@@ -1362,13 +1398,20 @@ export function FileManager({ ak, sk, bucket, onBack }: {
             {/* Body */}
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 text-sm">
               {selectedFile.mimeType?.startsWith('image/') && domains.length > 0 && (
-                <div className="rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center" style={{ minHeight: 140 }}>
+                <div
+                  className="rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center cursor-zoom-in relative group"
+                  style={{ minHeight: 140 }}
+                  onClick={() => openPreview(selectedFile)}
+                >
                   <img
                     src={generateDownloadUrl(ak, sk, domains[0], selectedFile.key)}
                     alt={selectedFile.key}
                     className="max-w-full max-h-56 object-contain"
                     onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                   />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                    <ZoomIn className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" />
+                  </div>
                 </div>
               )}
               {([
@@ -1412,6 +1455,63 @@ export function FileManager({ ak, sk, bucket, onBack }: {
           </>
         )}
       </div>
+
+      {/* ── Image Preview Modal ── */}
+      {previewFile && domains.length > 0 && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
+          onClick={closePreview}
+        >
+          {/* Close */}
+          <button
+            onClick={closePreview}
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10 cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+
+          {/* Counter */}
+          {imageFiles.length > 1 && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/50 text-white text-xs">
+              {imageFiles.findIndex(f => f.key === previewFile.key) + 1} / {imageFiles.length}
+            </div>
+          )}
+
+          {/* Prev */}
+          {imageFiles.findIndex(f => f.key === previewFile.key) > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); previewPrev(); }}
+              className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10 cursor-pointer"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+          )}
+
+          {/* Next */}
+          {imageFiles.findIndex(f => f.key === previewFile.key) < imageFiles.length - 1 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); previewNext(); }}
+              className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10 cursor-pointer"
+            >
+              <ChevronRight className="w-6 h-6" />
+            </button>
+          )}
+
+          {/* Image */}
+          <img
+            src={generateDownloadUrl(ak, sk, domains[0], previewFile.key)}
+            alt={previewFile.key}
+            className="max-w-[90vw] max-h-[90vh] object-contain select-none"
+            onClick={(e) => e.stopPropagation()}
+            draggable={false}
+          />
+
+          {/* Filename */}
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/50 text-white text-xs max-w-[80vw] truncate text-center">
+            {previewFile.key.split('/').pop()}
+          </div>
+        </div>
+      )}
 
       {/* ── Create Folder Modal ── */}
       {showCreateFolder && (

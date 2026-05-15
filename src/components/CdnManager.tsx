@@ -10,7 +10,17 @@ import {
 } from "../lib/cdn";
 import { RefreshCw, History, Loader2 } from "lucide-react";
 
-export function CdnManager({ ak, sk }: { ak: string; sk: string }) {
+export function CdnManager({ 
+  ak, 
+  sk,
+  prefillDomain,
+  onPrefillUsed
+}: { 
+  ak: string; 
+  sk: string;
+  prefillDomain?: string;
+  onPrefillUsed?: () => void;
+}) {
   const [urls, setUrls] = useState("");
   const [loading, setLoading] = useState(false);
   const [subTab, setSubTab] = useState<"refresh" | "prefetch" | "history">("refresh");
@@ -19,6 +29,15 @@ export function CdnManager({ ak, sk }: { ak: string; sk: string }) {
   const [lastRequestId, setLastRequestId] = useState<string | null>(null);
   const [taskType, setTaskType] = useState<"refresh" | "prefetch">("refresh");
   const [urlError, setUrlError] = useState("");
+
+  // 处理预填域名
+  useEffect(() => {
+    if (prefillDomain) {
+      setUrls(`https://${prefillDomain}/`);
+      onPrefillUsed?.();
+      toast.info(`已自动填充域名：${prefillDomain}`);
+    }
+  }, [prefillDomain, onPrefillUsed]);
 
   const validateUrls = (list: string[]): { valid: string[]; invalid: string[] } => {
     const valid: string[] = [];
@@ -151,19 +170,19 @@ export function CdnManager({ ak, sk }: { ak: string; sk: string }) {
           <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg w-fit">
             <button
               onClick={() => setSubTab("refresh")}
-              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${subTab === "refresh" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all cursor-pointer ${subTab === "refresh" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
             >
               缓存刷新
             </button>
             <button
               onClick={() => setSubTab("prefetch")}
-              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${subTab === "prefetch" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all cursor-pointer ${subTab === "prefetch" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
             >
               资源预取
             </button>
             <button
               onClick={() => setSubTab("history")}
-              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${subTab === "history" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all cursor-pointer ${subTab === "history" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
             >
               任务历史
             </button>
@@ -180,13 +199,13 @@ export function CdnManager({ ak, sk }: { ak: string; sk: string }) {
                   <div className="flex bg-zinc-100 dark:bg-zinc-800 p-0.5 rounded-lg">
                     <button
                       onClick={() => { setTaskType("refresh"); loadTasks(undefined, "refresh"); }}
-                      className={`px-3 py-1 text-xs font-medium rounded transition-all ${taskType === "refresh" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500"}`}
+                      className={`px-3 py-1 text-xs font-medium rounded transition-all cursor-pointer ${taskType === "refresh" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500"}`}
                     >
                       刷新
                     </button>
                     <button
                       onClick={() => { setTaskType("prefetch"); loadTasks(undefined, "prefetch"); }}
-                      className={`px-3 py-1 text-xs font-medium rounded transition-all ${taskType === "prefetch" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500"}`}
+                      className={`px-3 py-1 text-xs font-medium rounded transition-all cursor-pointer ${taskType === "prefetch" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500"}`}
                     >
                       预取
                     </button>
@@ -194,7 +213,7 @@ export function CdnManager({ ak, sk }: { ak: string; sk: string }) {
                   <button
                     onClick={() => loadTasks()}
                     disabled={loadingTasks}
-                    className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50"
+                    className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                   >
                     <RefreshCw className={`w-4 h-4 ${loadingTasks ? 'animate-spin' : ''}`} />
                     刷新
@@ -273,7 +292,7 @@ export function CdnManager({ ak, sk }: { ak: string; sk: string }) {
               <button
                 onClick={handleSubmit}
                 disabled={loading || !urls.trim()}
-                className="flex bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors items-center gap-2 shadow-sm"
+                className="flex bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors items-center gap-2 shadow-sm cursor-pointer disabled:cursor-not-allowed"
               >
                 {subTab === "refresh" ? "刷新" : "预取"}
               </button>

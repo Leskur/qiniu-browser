@@ -24,7 +24,7 @@
 
 ### 下载安装
 
-前往 [Releases](https://github.com/YOUR_USERNAME/qiniu-browser/releases) 页面下载对应平台的安装包：
+前往 [Releases](https://github.com/Leskur/qiniu-browser/releases) 页面下载对应平台的安装包：
 
 - **Windows**: `.exe` 或 `.msi`
 - **macOS**: `.dmg`
