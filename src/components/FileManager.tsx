@@ -58,8 +58,8 @@ type VirtualEntry =
   | { type: 'folder'; name: string; prefix: string }
   | { type: 'file'; name: string; file: QiniuFile };
 
-export function FileManager({ ak, sk, bucket, onBack }: {
-  ak: string; sk: string; bucket: string; onBack: () => void
+export function FileManager({ ak, sk, bucket, onBack, refreshTrigger }: {
+  ak: string; sk: string; bucket: string; onBack: () => void; refreshTrigger?: number;
 }) {
   const [domains, setDomains] = useState<string[]>([]);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -637,6 +637,15 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     el.addEventListener('scroll', handler, { passive: true });
     return () => el.removeEventListener('scroll', handler);
   }, [hasMore, loadingMore, loadMore]);
+
+  // ── F5 刷新触发 ──
+  useEffect(() => {
+    if (refreshTrigger !== undefined && refreshTrigger > 0) {
+      loadDirectory(currentPrefix, true);
+      toast.success('已刷新文件列表');
+    }
+  }, [refreshTrigger]);
+
   const rowVirtualizer = useVirtualizer({
     count: sortedEntries.length,
     getScrollElement: () => scrollContainerRef.current,

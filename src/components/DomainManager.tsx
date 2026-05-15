@@ -12,13 +12,15 @@ export function DomainManager({
   sk,
   selectedDomain,
   onSelectDomain,
-  onRefreshDomain
+  onRefreshDomain,
+  refreshTrigger
 }: { 
   ak: string; 
   sk: string;
   selectedDomain: string | null;
   onSelectDomain: (domain: string | null) => void;
   onRefreshDomain: (domain: string) => void;
+  refreshTrigger?: number;
 }) {
   const [domains, setDomains] = useState<CdnDomain[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +54,13 @@ export function DomainManager({
   useEffect(() => {
     loadDomains();
   }, [ak, sk]);
+
+  // ── F5 刷新触发 ──
+  useEffect(() => {
+    if (refreshTrigger !== undefined && refreshTrigger > 0) {
+      handleRefresh();
+    }
+  }, [refreshTrigger]);
 
   const handleRefresh = async () => {
     setRefreshing(true);

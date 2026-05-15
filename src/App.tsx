@@ -232,6 +232,7 @@ function App() {
   const [isResizing, setIsResizing] = useState(false);
   const [memoryMB, setMemoryMB] = useState<number | null>(null);
   const [bucketListScrollPos, setBucketListScrollPos] = useState(0);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const { buckets, setBuckets } = useAppStore();
   
@@ -318,6 +319,33 @@ function App() {
   useEffect(() => {
     checkForUpdates(false);
   }, []);
+
+  // F5 刷新当前页面
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F5') {
+        e.preventDefault();
+        
+        if (activeSection === 'storage') {
+          if (selectedBucket) {
+            // 在文件管理页面，触发文件列表刷新
+            setRefreshTrigger(prev => prev + 1);
+          } else {
+            // 在空间列表页面，刷新空间列表
+            loadBuckets();
+            toast.success('已刷新空间列表');
+          }
+        } else if (activeSection === 'cdn') {
+          // 在 CDN 页面，触发子组件刷新
+          setRefreshTrigger(prev => prev + 1);
+        }
+        // settings 页面不需要刷新
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeSection, selectedBucket]);
 
   const handleLogout = () => {
     setIsAuthenticated(false);
@@ -511,6 +539,7 @@ function App() {
                       sk={credentials.sk}
                       bucket={selectedBucket}
                       onBack={() => setSelectedBucket(null)}
+                      refreshTrigger={refreshTrigger}
                     />
                   </div>
                 ) : (
@@ -563,15 +592,16 @@ function App() {
                 
                 {/* CDN Content */}
                 <div className="flex-1 overflow-hidden">
-                  {cdnSubSection === "refresh" && (
+                  <div className={`h-full ${cdnSubSection === "refresh" ? "" : "hidden"}`}>
                     <CdnManager 
                       ak={credentials.ak} 
                       sk={credentials.sk}
                       prefillDomain={prefillDomain}
                       onPrefillUsed={() => setPrefillDomain("")}
+                      refreshTrigger={refreshTrigger}
                     />
-                  )}
-                  {cdnSubSection === "domains" && (
+                  </div>
+                  <div className={`h-full ${cdnSubSection === "domains" ? "" : "hidden"}`}>
                     <DomainManager 
                       ak={credentials.ak} 
                       sk={credentials.sk}
@@ -581,8 +611,9 @@ function App() {
                         setPrefillDomain(domain);
                         setCdnSubSection("refresh");
                       }}
+                      refreshTrigger={refreshTrigger}
                     />
-                  )}
+                  </div>
                 </div>
               </div>
               <div className={activeSection === "settings" ? "h-full" : "hidden"}>

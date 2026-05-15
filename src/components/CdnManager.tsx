@@ -14,12 +14,14 @@ export function CdnManager({
   ak, 
   sk,
   prefillDomain,
-  onPrefillUsed
+  onPrefillUsed,
+  refreshTrigger
 }: { 
   ak: string; 
   sk: string;
   prefillDomain?: string;
   onPrefillUsed?: () => void;
+  refreshTrigger?: number;
 }) {
   const [urls, setUrls] = useState("");
   const [loading, setLoading] = useState(false);
@@ -142,6 +144,14 @@ export function CdnManager({
       loadTasks(lastRequestId || undefined);
     }
   }, [subTab]);
+
+  // ── F5 刷新触发 ──
+  useEffect(() => {
+    if (refreshTrigger !== undefined && refreshTrigger > 0 && subTab === "history") {
+      loadTasks(lastRequestId || undefined);
+      toast.success('已刷新任务列表');
+    }
+  }, [refreshTrigger]);
 
   const getStateBadge = (state: string) => {
     switch (state) {
