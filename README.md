@@ -97,7 +97,7 @@ git push origin v0.0.2
 
 推送 tag 后，GitHub Actions 会自动构建所有平台的安装包。
 
-详细说明请查看 [发布文档](./docs/RELEASE.md)。
+详细说明请查看 [发布文档](./docs/guides/RELEASE.md)。
 
 ## 🛠️ 技术栈
 
