@@ -427,3 +427,164 @@ export async function forceDeleteBucket(ak: string, sk: string, bucket: string):
   await deleteDirectory(ak, sk, bucket, "");
   await deleteBucket(ak, sk, bucket);
 }
+
+// ============================================================================
+// CDN 域名管理 API
+// ============================================================================
+
+export interface CdnDomain {
+  name: string;           // 域名
+  type: string;           // 类型: normal(普通) / pan(泛域名)
+  cname: string;          // CNAME 地址
+  protocol: string;       // 协议: http / https
+  platform: string;       // 平台: web / download / vod
+  geoCover: string;       // 加速区域: china(国内) / overseas(海外) / global(全球)
+  registerNo?: string;    // 备案号
+  operatingState: string; // 运营状态: success(成功) / processing(处理中) / failed(失败)
+  operatingStateDesc?: string; // 状态描述
+  createAt: number;       // 创建时间（Unix 时间戳）
+  modifyAt: number;       // 修改时间（Unix 时间戳）
+}
+
+export interface CdnDomainListResult {
+  marker: string;         // 分页标记
+  domains: CdnDomain[];   // 域名列表
+}
+
+/**
+ * 获取 CDN 域名列表
+ * @param marker 分页标记，首次请求传空字符串
+ * @param limit 每页数量，默认 100
+ */
+export async function fetchCdnDomains(
+  ak: string,
+  sk: string,
+  marker: string = "",
+  limit: number = 100
+): Promise<CdnDomainListResult> {
+  const host = "api.qiniu.com";
+  let pathWithQuery = `/domain?limit=${limit}`;
+  if (marker) {
+    pathWithQuery += `&marker=${encodeURIComponent(marker)}`;
+  }
+
+  const url = `https://${host}${pathWithQuery}`;
+  const token = generateQiniuToken(ak, sk, "GET", pathWithQuery, host);
+
+  const response = await tauriFetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: token,
+    },
+  });
+
+  if (!response.ok) {
+    throw await parseQiniuError(response, "获取 CDN 域名列表失败");
+  }
+
+  const data = await response.json();
+  return data as CdnDomainListResult;
+}
+
+/**
+ * 获取单个 CDN 域名详情
+ */
+export async function fetchCdnDomain(
+  ak: string,
+  sk: string,
+  domain: string
+): Promise<CdnDomain> {
+  const host = "api.qiniu.com";
+  const path = `/domain/${domain}`;
+  const url = `https://${host}${path}`;
+  const token = generateQiniuToken(ak, sk, "GET", path, host);
+
+  const response = await tauriFetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: token,
+    },
+  });
+
+  if (!response.ok) {
+    throw await parseQiniuError(response, "获取域名详情失败");
+  }
+
+  const data = await response.json();
+  return data as CdnDomain;
+}
+
+/**
+ * 上线 CDN 域名
+ */
+export async function onlineCdnDomain(
+  ak: string,
+  sk: string,
+  domain: string
+): Promise<void> {
+  const host = "api.qiniu.com";
+  const path = `/domain/${domain}/online`;
+  const url = `https://${host}${path}`;
+  const token = generateQiniuToken(ak, sk, "POST", path, host);
+
+  const response = await tauriFetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: token,
+    },
+  });
+
+  if (!response.ok) {
+    throw await parseQiniuError(response, "上线域名失败");
+  }
+}
+
+/**
+ * 下线 CDN 域名
+ */
+export async function offlineCdnDomain(
+  ak: string,
+  sk: string,
+  domain: string
+): Promise<void> {
+  const host = "api.qiniu.com";
+  const path = `/domain/${domain}/offline`;
+  const url = `https://${host}${path}`;
+  const token = generateQiniuToken(ak, sk, "POST", path, host);
+
+  const response = await tauriFetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: token,
+    },
+  });
+
+  if (!response.ok) {
+    throw await parseQiniuError(response, "下线域名失败");
+  }
+}
+
+/**
+ * 删除 CDN 域名
+ */
+export async function deleteCdnDomain(
+  ak: string,
+  sk: string,
+  domain: string
+): Promise<void> {
+  const host = "api.qiniu.com";
+  const path = `/domain/${domain}`;
+  const url = `https://${host}${path}`;
+  const token = generateQiniuToken(ak, sk, "DELETE", path, host);
+
+  const response = await tauriFetch(url, {
+    method: "DELETE",
+    headers: {
+      Authorization: token,
+    },
+  });
+
+  if (!response.ok) {
+    throw await parseQiniuError(response, "删除域名失败");
+  }
+}

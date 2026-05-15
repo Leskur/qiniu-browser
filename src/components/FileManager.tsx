@@ -480,7 +480,8 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     setSelectedKeys(new Set());
     try {
       const res = await fetchFiles(ak, sk, bucket, prefix, "", 50, "/");
-      const newItems = res.items || [];
+      // 过滤掉文件夹占位符（key 以 / 结尾的空文件）
+      const newItems = (res.items || []).filter(item => !item.key.endsWith('/'));
       const newFolders = res.commonPrefixes || [];
       const newMarker = res.marker || "";
       const newHasMore = !!res.marker;
@@ -509,7 +510,8 @@ export function FileManager({ ak, sk, bucket, onBack }: {
     setLoadingMore(true);
     try {
       const res = await fetchFiles(ak, sk, bucket, currentPrefix, nextMarker, 50, "/");
-      const moreItems = res.items || [];
+      // 过滤掉文件夹占位符（key 以 / 结尾的空文件）
+      const moreItems = (res.items || []).filter(item => !item.key.endsWith('/'));
       const moreFolders = res.commonPrefixes || [];
       const newMarker = res.marker || "";
       const newHasMore = !!res.marker;

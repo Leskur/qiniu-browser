@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html class="articles-doc articles-doc-show" lang="zh-cn" xml:lang="zh-cn">
+  <head>
+    <script type="text/javascript">var qns = window._qns || []; window._qns=qns;qns.push(["setStartLoadTime",new Date().getTime()]);qns.push(["setAccountID","591ead7b54630dd7aed533df"]);</script>
+    <meta name="csrf-param" content="authenticity_token" />
+<meta name="csrf-token" content="1V7Xr7YEqx2Z4wXScCB6j5HSxdXFo3WxigT01dL6OGJQMq2YwAxGO7HzdydFMvPYlPJ7is0RWPMXULE9myGdgg==" />
+    <meta charset="utf-8">
+    <meta name="google" value="notranslate">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <meta name="description" content="获取请求日志，下载日志">
+    <meta name="keywords" content="日志;日志下载">
+    <meta name="updated" content="2026-03-25 14:06:57 +0800">
+    <meta name="space" content="fusion">
+    <meta name="version" content="69c37b8110019019979eec59">
+    <meta name="article_id" content="69b7e5f410019078b2074c21">
+    <title>日志下载_API 文档_CDN - 七牛开发者中心</title>
+    <link rel="icon" type="image/x-icon" href="https://static.qiniu.com/favicon.ico" />
+    <link rel="stylesheet" type="text/css" href="https://dn-mars-assets.qbox.me/font-awesome-4.7.0/css/font-awesome.min.css">
+    <link rel="stylesheet" type="text/css" href="https://dn-mars-assets.qbox.me/highlight.js/9.12.0/styles/github-gist.min.css">
+    <link rel="stylesheet" media="all" href="/assets/application-5fbae5449496a6b8ca9ae1d92205f7f161b3c4bb4f414c4bb6d9bb4677aea7ca.css" />
+    <script src="/assets/application-c173b96a1e98a224d817f9ec08be0264921b28f598f7953a8044aac1547facc5.js"></script>
+    <script>
+      (function(para) {
+        var p = para.sdk_url, n = para.name, w = window, d = document, s = 'script',x = null,y = null;
+        if(typeof(w['sensorsDataAnalytic201505']) !== 'undefined') {
+          return false;
+        }
+        w['sensorsDataAnalytic201505'] = n;
+        w[n] = w[n] || function(a) {return function() {(w[n]._q = w[n]._q || []).push([a, arguments]);}};
+        var ifs = ['track','quick','register','registerPage','registerOnce','trackSignup', 'trackAbtest', 'setProfile','setOnceProfile','appendProfile', 'incrementProfile', 'deleteProfile', 'unsetProfile', 'identify','login','logout','trackLink','clearAllRegister','getAppStatus'];
+        for (var i = 0; i < ifs.length; i++) {
+          w[n][ifs[i]] = w[n].call(null, ifs[i]);
+        }
+        if (!w[n]._t) {
+          x = d.createElement(s), y = d.getElementsByTagName(s)[0];
+          x.async = 1;
+          x.src = p;
+          x.setAttribute('charset','UTF-8');
+          w[n].para = para;
+          y.parentNode.insertBefore(x, y);
+        }
+      })({
+        sdk_url: 'https://static.sensorsdata.cn/sdk/1.13.14/sensorsdata.min.js',
+        heatmap_url: 'https://static.sensorsdata.cn/sdk/1.13.14/heatmap.min.js',
+        name: 'sensors',
+        server_url: 'https://sensors.qiniu.com/sa?project=default',
+        heatmap:{}
+      });
+      sensors.quick('autoTrack');
+    </script>
+    <script>
+      function getQueryVariable(variable){
+        var query = window.location.search.substring(1);
+        var vars = query.split("&");
+        for (var i=0;i<vars.length;i++) {
+          var pair = vars[i].split("=");
+          if(pair[0] == variable){return pair[1];}
+        }
+        return(false);
+      }
+    </script>
+  </head>
+
+  <body class="articles-page articles-page-show">
+    <!--[if lt IE 10]>
+      <p class="browsehappy">您正在使用 <strong>旧浏览器</strong> . 为了更好的体验，请 <a href="http://browsehappy.com/">更新</a> 您的浏览器.</p>
+    <![endif]-->
+
+    <script>
+      if (getQueryVariable('portal_modal') == 1) {
+        $('body').addClass('portal_modal')
+      }
+    </script>
+
+    <nav class="navbar navbar-default navbar-fixed-top" id="navbar">
+      <div class="container-fluid">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar-collapse" aria-expanded="false">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="sidebar-toggle" href="javascript:;"><i class="fa fa-bars"></i></a>
+          
+          <a class="navbar-brand" href="/"><img width="50" src="/assets/logo-white-b90d685a6b146884636382426d11b7236f5f7ca1c5dfafdb6fa777a0f976fc1f.png" alt="Logo white" /><span>开发者中心</span></a>
+        </div>
+
+        <div class="collapse navbar-collapse" id="navbar-collapse">
+          <ul class="nav navbar-nav">
+            <li class="dropdown" id="spaces-dropdown">
+              <a href="javascript:;" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false">
+                产品与服务 <i class="fa fa-angle-down"></i>
+              </a>
+              <ul class="dropdown-menu space-dropdown-menu top-space-dropdown-menu" style="max-height: calc(100vh - 70px);overflow-y: auto">
+                  <li class="kodo"><a href="/kodo">对象存储</a></li>
+                  <li class="las"><a href="/las">全栈应用服务器</a></li>
+                  <li class="fusion"><a href="/fusion">CDN</a></li>
+                  <li class="aitokenapi"><a href="/aitokenapi">AI 大模型推理</a></li>
+                  <li class="dora"><a href="/dora">智能多媒体服务</a></li>
+                  <li class="mikustream"><a href="/mikustream">Miku 快直播</a></li>
+                  <li class="ssl"><a href="/ssl">SSL 证书服务</a></li>
+                  <li class="qvm"><a href="/qvm">云主机</a></li>
+                  <li class="censor"><a href="/censor">内容审核</a></li>
+                  <li class="qvs"><a href="/qvs">视频监控</a></li>
+                  <li class="dcdn"><a href="/dcdn">全站加速</a></li>
+                  <li class="idh"><a href="/idh">智能数字人</a></li>
+                  <li class="tutugo"><a href="/tutugo">拓图 AI</a></li>
+              </ul>
+            </li>
+
+            <li class="">
+              <a href="/af">账户财务</a>
+            </li>
+
+            <li class="mobile dropdown" id="sdk-dropdown">
+              <a href="javascript:;" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false">
+                SDK &amp; 工具 <i class="fa fa-angle-down"></i>
+              </a>
+              <ul class="dropdown-menu sdk-dropdown-menu">
+                <li><a href="/sdk#official-sdk">官方 SDK</a></li>
+                <li><a href="/sdk#community-sdk">社区 SDK</a></li>
+                <li><a href="/sdk#official-tool">开发者工具</a></li>
+                <li><a href="/sdk#community-plugin">社区插件</a></li>
+              </ul>
+            </li>
+
+            <li class="mobile ">
+              <a href="https://www.qiniu.com/solutions">解决方案</a>
+            </li>
+
+            <li class="">
+              <a href="/faq">FAQ</a>
+            </li>
+
+            <li class="mobile"><a target="_blank" href="https://support.qiniu.com/">技术支持</a></li>
+
+          </ul>
+
+          <ul class="nav navbar-nav navbar-right">
+
+            <li class="mobile www-item"><a target="_blank" href="https://www.qiniu.com/">官网</a></li>
+
+            <li class="mobile portal-item"><a target="_blank" href="https://portal.qiniu.com/">管理控制台</a></li>
+
+            <li class="dropdown hidden more-dropdown" id="more-dropdown">
+              <a href="javascript:;" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false">
+                更多 <i class="fa fa-angle-down"></i>
+              </a>
+              <ul class="dropdown-menu more-dropdown-menu">
+                <li><a href="https://www.qiniu.com/" class="text-sub" target="_blank">官网</a></li>
+                <li><a href="https://portal.qiniu.com/" class="text-sub" target="_blank">管理控制台</a></li>
+              </ul>
+            </li>
+
+            <li class="mobile ">
+              <a href="/sdk">SDK &amp; 工具</a>
+            </li>
+            <li class="mobile ">
+              <a href="https://www.qiniu.com/solutions">解决方案</a>
+            </li>
+            <li class="mobile search-item">
+              <a href="/search">输入搜索的关键字</a>
+            </li>
+            <li class="mobile"><a target="_blank" href="https://support.qiniu.com/">技术支持</a></li>
+            <li class="dropdown hidden userinfo" id="user-dropdown">
+              <a href="javascript:;" class="dropdown-toggle user-email" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false">
+                <i class="fa fa-angle-down"></i>
+              </a>
+              <ul class="dropdown-menu user-dropdown-menu">
+                <li><a href="https://sso.qiniu.com/signout" class="text-sub">退出当前帐号</a></li>
+              </ul>
+            </li>
+            <li class="need-signin"><a href="https://sso.qiniu.com?client_id=qauxtCZX9RGtu5wVf4E8qrruem5Ko2I0ZFzuHV4uIYzgAioQVhjE5QAZuLP8Lh2o&amp;redirect_url=https://developer.qiniu.com">登录</a></li>
+            <li class="need-signin"><a target="_blank" href="https://portal.qiniu.com/signup">注册</a></li>
+          </ul>
+
+          <div class="search-form nav navbar-nav navbar-right col-md-2 col-sm-2">
+            <form action="/search">
+              <input type="text" name="keyword" class="form-control search-box" placeholder="输入搜索的关键字" tabindex="1">
+              <i class="icon fa fa-search"></i>
+            </form>
+          </div>
+        </div><!-- /.navbar-collapse -->
+      </div><!-- /.container-fluid -->
+    </nav>
+
+    <div class="topic-container" slug=fusion-api-log-download space=fusion>
+  <div class="topic-sidebar-wrap">
+  <h3 class="space-title fusion">
+    <a href="/fusion">CDN</a>
+    <a class="tool folder" arial-value="true" title="展开所有菜单" class="btn copybtn" data-toggle="tooltip" data-placement="bottom"><i class="fa fa-angle-right"></i></a>
+  </h3>
+  <div class="doctree">
+    
+    
+    
+    <ul>
+        <li class="cate-product_introduction branch">
+          <a class="node-title category" href="javascript:;">
+            <span>产品简介</span>
+            <i class="icon fa"></i>
+          </a>
+          <ol>
+      <li class="leaf"><a class="node-title   tree-level-1" href="/fusion/3824/product-overview-fusion"><span>产品概述</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/3825/noun-explanation-fusion"><span>名词解释</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/3826/product-features-fusion"><span>功能特性</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/3827/usage-scenarios-fusion"><span>使用场景</span><i class="icon fa"></i></a></li></ol></li></ul>
+    <ul>
+        <li class="cate-buying_guide branch">
+          <a class="node-title category" href="javascript:;">
+            <span>购买指南</span>
+            <i class="icon fa"></i>
+          </a>
+          <ol>
+      <li class="leaf"><a class="node-title   tree-level-1" href="/fusion/6843/cdn-product-pricing"><span>CDN 产品价格说明</span><i class="icon fa"></i></a></li></ol></li></ul>
+    <ul>
+        <li class="cate-quick_start branch">
+          <a class="node-title category" href="javascript:;">
+            <span>快速入门</span>
+            <i class="icon fa"></i>
+          </a>
+          <ol>
+      <li class="leaf"><a class="node-title   tree-level-1" href="/fusion/1228/fusion-quick-start"><span>快速入门</span><i class="icon fa"></i></a></li></ol></li></ul>
+    <ul>
+        <li class="cate-development_guidelines branch">
+          <a class="node-title category" href="javascript:;">
+            <span>使用指南</span>
+            <i class="icon fa"></i>
+          </a>
+          <ol>
+      <li class="leaf"><a class="node-title   tree-level-1" href="/fusion/11980/cdn-domain-verify-introduce"><span>域名归属校验</span><i class="icon fa"></i></a></li><li class="branch"><a class="node-title  sub-category tree-level-1" href="javascript:;"><span>域名管理</span><i class="icon fa"></i></a><ol><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/8079/label-management"><span>标签管理</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/4939/the-domain-name-to-access"><span>域名接入</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/4940/domain-name-operation"><span>域名操作</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/4941/cname-configuration"><span>CNAME配置</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/5857/the-domain-name-back"><span>域名找回</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/12510/cdn-domain-bulk-copy"><span>批量复制</span><i class="icon fa"></i></a></li></ol></li><li class="branch"><a class="node-title  sub-category tree-level-1" href="javascript:;"><span>配置管理</span><i class="icon fa"></i></a><ol><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/4945/an-overview-of-the-configuration"><span>配置概览</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/4942/the-basic-information"><span>基本信息</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/4943/back-to-the-source-configuration"><span>回源配置</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/4944/cache-configuration"><span>缓存配置</span><i class="icon fa"></i></a></li><li class="branch"><a class="node-title   tree-level-2" href="/fusion/4960/access-control-configuration"><span>访问控制配置</span><i class="icon fa"></i></a><ol><li class="leaf"><a class="node-title   tree-level-3" href="/fusion/3839/domain-name-hotlinking-prevention"><span>Referer防盗链</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-3" href="/fusion/3841/timestamp-hotlinking-prevention-fusion"><span>时间戳防盗链</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-3" href="/fusion/3930/back-to-the-source-authentication"><span>回源鉴权</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-3" href="/fusion/4977/ip-black-and-white-list"><span>IP黑白名单</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-3" href="/fusion/12970/ua-black-and-white-list"><span>UA黑白名单</span><i class="icon fa"></i></a></li></ol></li><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/4952/https-configuration"><span>HTTPS配置</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/6778/the-http-response-header-configuration"><span>HTTP响应头配置</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/4954/image-optimization"><span>图片优化</span><i class="icon fa"></i></a></li></ol></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/3845/refresh-the-prefetch-fusion"><span>刷新预取</span><i class="icon fa"></i></a></li><li class="branch"><a class="node-title   tree-level-1" href="/fusion/3846/data-statistics-fusion"><span>统计分析</span><i class="icon fa"></i></a><ol><li class="leaf"><a class="node-title   tree-level-2" href="/fusion/5029/usage-statistics"><span>用量统计</span><i class="icon fa"></i></a></li><li class="branch"><a class="node-title  sub-category tree-level-2" href="javascript:;"><span>日志分析</span><i class="icon fa"></i></a><ol><li class="leaf"><a class="node-title   tree-level-3" href="/fusion/7445/distribution-of-regional-operators"><span>地区运营商分布</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-3" href="/fusion/5032/shooting"><span>命中率</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-3" href="/fusion/5031/status-code"><span>状态码</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-3" href="/fusion/7446/top-url-ip"><span>TOP 访问统计</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-3" href="/fusion/5033/independent-ip"><span>独立IP统计</span><i class="icon fa"></i></a></li></ol></li></ol></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/3847/cdn-log-fusion"><span>CDN 日志</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/7093/CDN-the-alarm-service"><span>告警服务</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/1360/overseas-nodes"><span>海外加速节点</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/1367/custom-domain-name-binding-process"><span>绑定加速域名和域名解析流程</span><i class="icon fa"></i></a></li></ol></li></ul>
+    <ul>
+        <li class="cate-api branch">
+          <a class="node-title category" href="javascript:;">
+            <span>API 文档</span>
+            <i class="icon fa"></i>
+          </a>
+          <ol>
+      <li class="leaf"><a class="node-title   tree-level-1" href="/fusion/13353/fusion-api-overview"><span>API列表</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/13360/fusion-api-auth-guide"><span>鉴权指南</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/13361/fusion-api-error-codes"><span>公共错误码 &amp; 通用约束</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/13362/fusion-api-quick-start"><span>快速入门</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/13363/fusion-api-domain-management"><span>域名管理</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/13364/fusion-api-domain-config"><span>域名配置</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/13365/fusion-api-usage-stats"><span>用量统计</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/13366/fusion-api-analytics"><span>运营统计</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/13367/fusion-api-cache-management"><span>缓存管理</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title   tree-level-1" href="/fusion/13368/fusion-api-cert-management"><span>证书管理</span><i class="icon fa"></i></a></li><li class="leaf"><a class="node-title active  tree-level-1" href="/fusion/13369/fusion-api-log-download"><span>日志下载</span><i class="icon fa"></i></a></li></ol></li></ul>
+    
+    <ul>
+        <li class="cate-tools branch">
+          <a class="node-title category" href="javascript:;">
+            <span>实用工具</span>
+            <i class="icon fa"></i>
+          </a>
+          <ol>
+      <li class="leaf"><a class="node-title   tree-level-1" href="/fusion/1665/qlogfetch"><span>CDN日志查询和下载工具</span><i class="icon fa"></i></a></li></ol></li></ul>
+    
+    
+    <ul>
+        <li class="cate-service_agreement branch">
+          <a class="node-title category" href="javascript:;">
+            <span>服务协议</span>
+            <i class="icon fa"></i>
+          </a>
+          <ol>
+      <li class="leaf"><a class="node-title   tree-level-1" href="/fusion/3892/fusion-cdn-sla"><span>服务保障协议(SLA)</span><i class="icon fa"></i></a></li></ol></li></ul>
+    <ul>
+      <li class="cate-tools branch closed">
+        <a class="node-title category" href="/faq?space=fusion">常见问题</a>      </li>
+    </ul>
+    
+    
+  </div>
+</div>
+  
+  <div class="topic-content-wrap">
+    <div class="container">
+      <div class="article-content">
+        <div class="topic-title">
+          <div class="rating-right">
+            <div class="rating">
+                    <li index="1" data-toggle="tooltip" data-placement="top" container="body" title="根本没有帮助">                      <i class="fa fa-star-o"></i>
+</li>                    <li index="2" data-toggle="tooltip" data-placement="top" container="body" title="文档较差">                      <i class="fa fa-star-o"></i>
+</li>                    <li index="3" data-toggle="tooltip" data-placement="top" container="body" title="文档一般">                      <i class="fa fa-star-o"></i>
+</li>                    <li index="4" data-toggle="tooltip" data-placement="top" container="body" title="文档不错">                      <i class="fa fa-star-o"></i>
+</li>                    <li index="5" data-toggle="tooltip" data-placement="top" container="body" title="文档很好">                      <i class="fa fa-star-o"></i>
+</li>            </div>
+          </div>
+          <div class="doctree">
+            <a href="/fusion">CDN</a> > <span>API 文档</span> > <span>日志下载</span>
+          </div>
+          <h1>            <span>日志下载</span>            </h1>
+          <p class="topic-meta">最近更新时间: 2026-03-25 14:06:57</p>
+        </div>
+
+        <div class="topic-detail">
+          <h1 data-v-md-heading="_1-快速查阅区" data-v-md-line="1">1. 快速查阅区</h1>
+<h2 data-v-md-heading="_1-1-核心接口概览" data-v-md-line="3">1.1 核心接口概览</h2>
+<table data-v-md-line="4">
+<thead>
+<tr>
+<th>接口功能</th>
+<th>请求方法</th>
+<th>接口路径</th>
+<th>核心参数</th>
+<th>成功响应</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#P21">获取日志下载链接</a></td>
+<td>POST</td>
+<td><code>/v2/tune/log/list</code></td>
+<td>day、domains</td>
+<td><code>{&quot;code&quot;:200,&quot;data&quot;:{...}}</code></td>
+</tr>
+</tbody>
+</table>
+<h2 data-v-md-heading="_1-2-核心约束" data-v-md-line="8">1.2 核心约束</h2>
+<ul data-v-md-line="9">
+<li><strong>请求域名</strong>: <code>fusion.qiniuapi.com</code></li>
+<li><strong>鉴权方式</strong>: QBox 鉴权（详见 <a href="https://developer.qiniu.io/fusion/13360/fusion-api-auth-guide" target="_blank">鉴权指南<i class="v-md-icon-open-in-new"></i></a>）；</li>
+<li><strong>数据保留</strong>: 30 天，例如：当前日期为 2026-01-31，则只提供 2026-01-01 ~ 2026-01-30 的日志；</li>
+<li><strong>日志粒度</strong>: 每小时一个 gz 压缩文件，单小时内日志过大会进行切分(分片大小128MB)；</li>
+<li><strong>日志延迟</strong>: 6小时，例如：1月18日0点-1点的日志，会在1月18日8点-10点左右可下载。</li>
+</ul>
+<hr data-v-md-line="15">
+<h1 data-v-md-heading="_2-详细接口说明" data-v-md-line="17">2. 详细接口说明</h1>
+<div data-v-md-line="19"><div id="P21"></div>
+<span id="download-log" style="scroll-margin-top: 80px;"></span>
+</div><h2 data-v-md-heading="_2-1-获取日志下载链接" data-v-md-line="22">2.1 获取日志下载链接</h2>
+<h3 data-v-md-heading="基本信息" data-v-md-line="24">基本信息</h3>
+<ul data-v-md-line="25">
+<li><strong>请求方法</strong>: POST</li>
+<li><strong>接口地址</strong>: <code>https://fusion.qiniuapi.com/v2/tune/log/list</code></li>
+</ul>
+<h3 data-v-md-heading="请求参数" data-v-md-line="28">请求参数</h3>
+<table data-v-md-line="29">
+<thead>
+<tr>
+<th>参数名</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+<th>示例值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>day</td>
+<td>string</td>
+<td>是</td>
+<td>查询日期，格式 yyyy-MM-dd，仅支持单日</td>
+<td><code>&quot;2026-02-12&quot;</code></td>
+</tr>
+<tr>
+<td>domains</td>
+<td>string</td>
+<td>是</td>
+<td>域名，分号分隔 (同<a href="https://developer.qiniu.io/fusion/13365/fusion-api-usage-stats#query-billing-request" target="_blank">用量统计<i class="v-md-icon-open-in-new"></i></a>，非数组)</td>
+<td><code>&quot;a.com;b.com&quot;</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote data-v-md-line="34">
+<p data-v-md-line="34"><strong>domains 为 string 类型</strong>，传数组会报 400。</p>
+</blockquote>
+<h3 data-v-md-heading="请求示例" data-v-md-line="36">请求示例</h3>
+<div data-v-md-line="37"><!--beforebegin--><div class="v-md-pre-wrapper v-md-pre-wrapper-bash extra-class" extra-attr><!--afterbegin--><pre class="v-md-prism-bash"><code>curl -X POST 'https://fusion.qiniuapi.com/v2/tune/log/list' \
+  -H 'Host: fusion.qiniuapi.com' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: QBox &lt;AK&gt;:&lt;Sign&gt;' \
+  -d '{&quot;day&quot;:&quot;2026-02-12&quot;,&quot;domains&quot;:&quot;test.example.com&quot;}'
+</code></pre>
+<!--beforeend--></div><!--afterend--></div><h3 data-v-md-heading="响应参数" data-v-md-line="44">响应参数</h3>
+<table data-v-md-line="45">
+<thead>
+<tr>
+<th>参数名</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>name</td>
+<td>string</td>
+<td>日志文件名 (含域名+日期+小时)</td>
+</tr>
+<tr>
+<td>size</td>
+<td>int</td>
+<td>文件大小 (byte)</td>
+</tr>
+<tr>
+<td>mtime</td>
+<td>int</td>
+<td>文件修改时间 (Unix 时间戳)</td>
+</tr>
+<tr>
+<td>url</td>
+<td>string</td>
+<td>带签名的下载链接 (有时效)</td>
+</tr>
+<tr>
+<td>md5</td>
+<td>string</td>
+<td>文件 MD5</td>
+</tr>
+<tr>
+<td>domain</td>
+<td>string</td>
+<td>所属域名</td>
+</tr>
+</tbody>
+</table>
+<h3 data-v-md-heading="响应示例" data-v-md-line="54">响应示例</h3>
+<p data-v-md-line="55"><strong>成功</strong> (HTTP 200):</p>
+<div data-v-md-line="56"><!--beforebegin--><div class="v-md-pre-wrapper v-md-pre-wrapper-json extra-class" extra-attr><!--afterbegin--><pre class="v-md-prism-json"><code>{
+  &quot;code&quot;: 200,
+  &quot;error&quot;: &quot;&quot;,
+  &quot;data&quot;: {
+    &quot;test.example.com&quot;: [
+      {
+        &quot;name&quot;: &quot;v2/test.example.com_2026-02-12-07_part-00000.gz&quot;,
+        &quot;size&quot;: 311,
+        &quot;mtime&quot;: 1770868332,
+        &quot;url&quot;: &quot;https://fusionlog.qiniu.com/v2/test.example.com_2026-02-12-07_part-00000.gz?e=...&amp;token=...&quot;,
+        &quot;md5&quot;: &quot;&quot;,
+        &quot;domain&quot;: &quot;test.example.com&quot;
+      }
+    ]
+  }
+}
+</code></pre>
+<!--beforeend--></div><!--afterend--></div><blockquote data-v-md-line="75">
+<p data-v-md-line="75">data 按域名分组，每个域名对应一个日志文件数组。无数据时对应域名的数组为空。</p>
+</blockquote>
+<p data-v-md-line="77"><strong>失败</strong>:</p>
+<div data-v-md-line="78"><!--beforebegin--><div class="v-md-pre-wrapper v-md-pre-wrapper-json extra-class" extra-attr><!--afterbegin--><pre class="v-md-prism-json"><code>{
+    &quot;code&quot;: 400,
+    &quot;error&quot;: &quot;请求参数格式错误&quot;,
+    &quot;data&quot;: {}
+}
+</code></pre>
+<!--beforeend--></div><!--afterend--></div><hr data-v-md-line="86">
+<h2 data-v-md-heading="日志格式" data-v-md-line="87">日志格式</h2>
+<p data-v-md-line="88">每行一条记录，字段顺序如下：</p>
+<p data-v-md-line="90"><strong>示例日志</strong>:</p>
+<div data-v-md-line="91"><!--beforebegin--><div class="v-md-pre-wrapper v-md-pre-wrapper- extra-class" extra-attr><!--afterbegin--><pre class="v-md-prism-"><code>148.153.188.135 UNKNOWN 1 [13/Feb/2026:12:09:15 +0800] &quot;GET https://test.example.com/qiniu_do_not_delete.gif HTTP/1.1&quot; 403 345 &quot;-&quot; &quot;Q-uc-client&quot;
+</code></pre>
+<!--beforeend--></div><!--afterend--></div><p data-v-md-line="95"><strong>字段说明</strong>:</p>
+<table data-v-md-line="96">
+<thead>
+<tr>
+<th>序号</th>
+<th>字段</th>
+<th>说明</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>ClientIP</td>
+<td>客户端 IP</td>
+<td><code>148.153.188.135</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>Hit/Miss</td>
+<td>命中状态</td>
+<td><code>HIT</code> / <code>MISS</code> / <code>UNKNOWN</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>ResponseTime</td>
+<td>响应时间 (毫秒)</td>
+<td><code>1</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>Time</td>
+<td>请求时间 ([] 包裹)</td>
+<td><code>[13/Feb/2026:12:09:15 +0800]</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td>Method</td>
+<td>请求方法 (&quot;&quot; 包裹 5-7)</td>
+<td><code>GET</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td>URL</td>
+<td>请求 URL (含域名完整路径)</td>
+<td><code>https://test.example.com/qiniu_do_not_delete.gif</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td>Protocol</td>
+<td>请求协议</td>
+<td><code>HTTP/1.1</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td>StatusCode</td>
+<td>HTTP 状态码</td>
+<td><code>403</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td>TrafficSize</td>
+<td>响应大小 (byte)</td>
+<td><code>345</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td>Referer</td>
+<td>来源页 (&quot;&quot; 包裹)</td>
+<td><code>&quot;-&quot;</code></td>
+</tr>
+<tr>
+<td>11</td>
+<td>UserAgent</td>
+<td>用户代理 (&quot;&quot; 包裹)</td>
+<td><code>&quot;Q-uc-client&quot;</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote data-v-md-line="110">
+<p data-v-md-line="110">格式说明: Method+URL+Protocol 被 <code>&quot;&quot;</code> 包裹为一组，Referer 和 UserAgent 各自被 <code>&quot;&quot;</code> 包裹。</p>
+</blockquote>
+<hr data-v-md-line="112">
+<h1 data-v-md-heading="_3-常见问题" data-v-md-line="114">3. 常见问题</h1>
+<h2 data-v-md-heading="_3-1-专属错误码" data-v-md-line="116">3.1 专属错误码</h2>
+<table data-v-md-line="117">
+<thead>
+<tr>
+<th>错误码</th>
+<th>描述</th>
+<th>场景</th>
+<th>解决方案</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>400</td>
+<td>参数格式错误</td>
+<td>日期格式非 yyyy-MM-dd 或 domains 传数组</td>
+<td>修正参数格式</td>
+</tr>
+<tr>
+<td>400032</td>
+<td>请求中存在无效的域名</td>
+<td>域名未接入 CDN 或拼写错误</td>
+<td>确认域名已创建且上线</td>
+</tr>
+</tbody>
+</table>
+<h2 data-v-md-heading="_3-2-最佳实践" data-v-md-line="122">3.2 最佳实践</h2>
+<ul data-v-md-line="123">
+<li><strong>查询时机</strong>: 日志延迟6小时，查询前日日志，建议次日上午查询</li>
+<li><strong>下载链接</strong>: url 含时效签名，获取后尽快下载</li>
+<li><strong>domains 格式</strong>: string 类型分号分隔，同<a href="https://developer.qiniu.io/fusion/13365/fusion-api-usage-stats#query-billing-request" target="_blank">用量统计<i class="v-md-icon-open-in-new"></i></a></li>
+<li><strong>日志命名</strong>: <code>域名_日期-小时_part-序号.gz</code>，按小时拆分</li>
+<li><strong>批量下载</strong>: 多域名一次查询，响应按域名分组</li>
+</ul>
+<blockquote data-v-md-line="129">
+<p data-v-md-line="129"><strong>参考</strong>: 鉴权详见 <a href="https://developer.qiniu.io/fusion/13360/fusion-api-auth-guide" target="_blank">鉴权指南<i class="v-md-icon-open-in-new"></i></a>，错误码详见 <a href="https://developer.qiniu.io/fusion/13361/fusion-api-error-codes" target="_blank">公共错误码&amp;通用约束<i class="v-md-icon-open-in-new"></i></a>。</p>
+</blockquote>
+
+        </div>
+
+        <div class="rating-bottom">
+  <span>以上内容是否对您有帮助？</span>
+  <div class="rating">
+          <li index="1" data-toggle="tooltip" data-placement="top" container="body" title="根本没有帮助">            <i class="fa fa-star-o"></i>
+</li>          <li index="2" data-toggle="tooltip" data-placement="top" container="body" title="文档较差">            <i class="fa fa-star-o"></i>
+</li>          <li index="3" data-toggle="tooltip" data-placement="top" container="body" title="文档一般">            <i class="fa fa-star-o"></i>
+</li>          <li index="4" data-toggle="tooltip" data-placement="top" container="body" title="文档不错">            <i class="fa fa-star-o"></i>
+</li>          <li index="5" data-toggle="tooltip" data-placement="top" container="body" title="文档很好">            <i class="fa fa-star-o"></i>
+</li>  </div>
+</div>
+
+<div class="feedback">
+  <div class="header">
+    文档反馈
+    <small>(如有产品使用问题，请<a href="https://support.qiniu.com/tickets/category" target="_blank"> 提交工单</a>)</small>
+  </div>
+  <div class="body">
+    <div id="feedbackform">
+      <div>
+         <input type="email" id="creator" placeholder="请输入邮箱" required="required" />
+        <span class="err-info"></span>
+      </div>
+      <div>
+        <textarea name="content" id="content" rows="3" placeholder="请留下你宝贵的意见" required="required">
+</textarea>
+      </div>
+      <div>
+        <button class="btn btn-primary" disabled>提交</button>
+      </div>
+    </div>
+  </div>
+</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+    <!-- Modal -->
+    <div class="modal fade alert-modal-css form-wrapper" id="feedback-modal" tabindex="-1" role="dialog" aria-labelledby="feedback-modal-label" data-keyboard="false" data-backdrop="true">
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+            <h4 class="modal-title" id="feedback-modal-label">产品及服务咨询</h4>
+          </div>
+          <div class="modal-body">
+            <div id="feedback-alert-success" class="alert alert-success" style="display: none; text-align: center;">
+              提交成功！
+            </div>
+            <div id="feedback-alert-error" class="alert alert-danger" style="display: none; text-align: center;">
+              </i> 提交失败，稍后重试！
+            </div>
+            <div class="tips text-center">
+              此表单仅用于产品及服务售前咨询（您也可以拨打400-808-9176转2）<br />
+              如有售后技术咨询，请<a class="more underline" href="https://support.qiniu.com/tickets/category">提交工单</a>            </div>
+
+            <form class="form-horizontal" id="feedback-form" action="/feedbacks?t=b66602cd-50c9-4a8b-b1c4-597bb14c7bd0" accept-charset="UTF-8" data-remote="true" method="post"><input name="utf8" type="hidden" value="&#x2713;" /><input type="hidden" name="authenticity_token" value="Diz2pWWc97xwxCqHRPTD+xnAADWPlXugnFQT4/XwOeRm6zBomKiGW3JKVQIhqVChU2JUUs/0dJTJOvhQeoAE+A==" />
+              <input value="http://developer-source.qiniu.io/fusion/13369/fusion-api-log-download" type="hidden" name="feedback[referer]" id="feedback_referer" />              <div class="form-group">
+                <label for="feedback-content" class="col-sm-2 control-label">咨询内容<small class="text-danger">*</small></label>
+                <div class="col-sm-10">
+                  <textarea maxLength="255" class="form-control" id="feedback-content" validate="true" name="feedback[content]" cols="" rows="5">
+</textarea>
+                  <div class="div-error">
+                    <label for="" class="error-label">请填写咨询内容</label>
+                  </div>
+                  <div class="maxLength-tips">
+                    <label for="" class="maxLength-label">最多可输入255字</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="feedback-name" class="col-sm-2 control-label">姓名<small class="text-danger">*</small></label>
+                <div class="col-sm-10">
+                  <input class="form-control" id="feedback-name" validate="true" type="text" name="feedback[name]" />
+                  <div class="div-error">
+                    <label for="" class="error-label">请填写姓名</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="feedback-company" class="col-sm-2 control-label">公司名称</label>
+                <div class="col-sm-10">
+                  <input class="form-control" id="feedback-company" type="text" name="feedback[company]" />
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="feedback-city" class="col-sm-2 control-label">省份<small class="text-danger">*</small></label>
+                <div class="col-sm-10" id="province_city" data-required="true">
+                  <select name="feedback[province]" id="province" class="province form-control" data-value="北京" data-required="true"></select>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="feedback-phone" class="col-sm-2 control-label">联系电话<small class="text-danger">*</small></label>
+                <div class="col-sm-10">
+                  <input class="form-control" id="feedback-phone" validate="true" type="tel" name="feedback[phone]" />
+                  <div class="div-error">
+                    <label for="" class="error-label">请以正确的格式填写联系电话</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="feedback-email" class="col-sm-2 control-label">电子邮箱<small class="text-danger">*</small></label>
+                <div class="col-sm-10">
+                  <input type="email" class="form-control" id="feedback-email" validate="true" name="feedback[email]" />
+                  <div class="div-error">
+                    <label for="" class="error-label">请填写电子邮箱</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button name="button" type="submit" class="btn btn-primary" id="feedback-submit" disabled="disabled" data-disable-with="正在提交中...">提交</button>
+              </div>
+</form>          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="row links">
+          <div class="col-md-2">
+            <div class="copyright">© 2026 七牛云</div>
+          </div>
+          <div class="col-md-10">
+            <ul class="qiniu-sites list-unstyled">
+              <li><a href="http://www.qiniu.com" target="_blank">七牛官网</a></li>
+              <li><a href="https://portal.qiniu.com" target="_blank">开发者平台</a></li>
+              <li><a href="https://segmentfault.com/qiniu" target="_blank">问答社区</a></li>
+              <li><a href="https://support.qiniu.com" target="_blank">技术支持</a></li>
+              <li><a href="https://status.qiniu.com/" target="_blank">服务状态</a></li>
+              <li><a href="/brand">七牛标识</a></li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-md-8">
+            <a class="out_link" href="http://www.beian.gov.cn/portal/registerSystemInfo?recordcode=31011502000961" target="_blank"><span class="icon icon-aq">沪公网安备 31011502000961 号</span></a>
+            <a class="out_link" href="http://www.beian.miit.gov.cn" target="_blank"><span>沪 ICP 备 11037377 号-5</span></a>
+          </div>
+          <div class="col-md-4">
+            <div class="social-follow">
+              <ul class="social-links list-unstyled">
+                <li><a href="https://github.com/qiniu" target="_blank"><i class="fa fa-lg fa-github-alt"></i></a></li>
+                <li><a href="http://e.weibo.com/qiniutek" target="_blank"><i class="fa fa-lg fa-weibo"></i></a></li>
+                <li class="social-weixin-qrcode">
+                  <a href="javascript:;"><i class="fa fa-lg fa-weixin"></i></a>
+                  <div class="popover fade top in" id="wexin-qrcode-popover">
+                    <div class="arrow"></div>
+                    <div class="popover-content"><img width="140" src="/assets/weixin-qrcode-e4ddfa8a1a16b96c60e4b671b676dfd168ab4f91b5a700a755dde294347fc0f0.png" alt="Weixin qrcode" /></div>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <!-- feedback entry -->
+    <div id="feedback-entry"></div>
+    <script src="https://www.qiniu.com/externals/loader.js"></script>
+    <script>
+      window.__qiniu_www_externals__.load('feedback-entry-v5', document.getElementById('feedback-entry'))
+    </script>
+
+    <script type="text/javascript" src="https://dn-mars-assets.qbox.me/highlight.js/9.12.0/highlight.min.js"></script>
+    <script type="text/javascript" src="https://dn-mars-assets.qbox.me/highlight.js/9.12.0/languages/go.min.js"></script>
+
+    <script>
+      (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+      (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+      m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+      })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+      ga('create', 'UA-91376707-1', 'auto');
+      ga('send', 'pageview');
+    </script>
+    <script>
+      // portal iframe通过  portal_modal  参数判断，嵌入文档
+      window.onload = function() {
+        if (getQueryVariable('portal_modal') == 1) {
+          var links = $('.portal_modal').find('a')
+          for (let item of links) {
+            if (item.target !== '_blank' && item.href && item.href.indexOf('portal_modal=1') === -1) {
+              let query = item.href.indexOf('?') == -1 ? '?portal_modal=1' : '&portal_modal=1'
+              let index = item.href.indexOf('#')
+              let newHref = index != -1 ? item.href.slice(0, index) + query + item.href.slice(index) : item.href + query
+              $(item).attr('href', newHref)
+            }
+          }
+          if (window.parent !== window.self ) {
+            window.parent.postMessage({ event: 'location:href' , payload: window.location.href }, 'https://portal.qiniu.com')
+          }
+        }
+      }
+    </script>
+  </body>
+</html>

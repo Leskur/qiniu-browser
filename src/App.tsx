@@ -6,6 +6,7 @@ import { Login } from "./components/Login";
 import { FileManager } from "./components/FileManager";
 import { BucketList } from "./components/BucketList";
 import { CdnManager } from "./components/CdnManager";
+import { DomainManager } from "./components/DomainManager";
 import { TransferPanel } from "./components/TransferPanel";
 import { fetchBuckets, QiniuBucket } from "./lib/qiniu";
 import { useAppStore, Theme } from "./store";
@@ -16,6 +17,7 @@ import {
 import "./App.css";
 
 type Section = "storage" | "cdn" | "settings";
+type CdnSubSection = "refresh" | "domains";
 
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "light",  label: "浅色",   icon: Sun },
@@ -231,6 +233,7 @@ function App() {
   const [error, setError] = useState("");
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<Section>("storage");
+  const [cdnSubSection, setCdnSubSection] = useState<CdnSubSection>("refresh");
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(208);
   const [isResizing, setIsResizing] = useState(false);
@@ -523,8 +526,36 @@ function App() {
                   </div>
                 )}
               </div>
-              <div className={activeSection === "cdn" ? "h-full" : "hidden"}>
-                <CdnManager ak={credentials.ak} sk={credentials.sk} />
+              <div className={activeSection === "cdn" ? "h-full flex flex-col" : "hidden"}>
+                {/* CDN Sub Navigation */}
+                <div className="flex items-center gap-2 px-6 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm shrink-0">
+                  <button
+                    onClick={() => setCdnSubSection("refresh")}
+                    className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${
+                      cdnSubSection === "refresh"
+                        ? "bg-emerald-500 text-white shadow-sm"
+                        : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    }`}
+                  >
+                    刷新预取
+                  </button>
+                  <button
+                    onClick={() => setCdnSubSection("domains")}
+                    className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${
+                      cdnSubSection === "domains"
+                        ? "bg-emerald-500 text-white shadow-sm"
+                        : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    }`}
+                  >
+                    域名管理
+                  </button>
+                </div>
+                
+                {/* CDN Content */}
+                <div className="flex-1 overflow-hidden">
+                  {cdnSubSection === "refresh" && <CdnManager ak={credentials.ak} sk={credentials.sk} />}
+                  {cdnSubSection === "domains" && <DomainManager ak={credentials.ak} sk={credentials.sk} />}
+                </div>
               </div>
               <div className={activeSection === "settings" ? "h-full" : "hidden"}>
                 <SettingsPanel />

@@ -190,3 +190,75 @@ export async function cdnGetLogs(
     day,
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 5. 刷新/预取任务查询
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface RefreshTask {
+  id: string;
+  url: string;
+  state: string;  // processing | success | failure
+  createAt: string;
+  finishAt?: string;
+}
+
+export interface RefreshTaskListResult {
+  code: number;
+  error: string;
+  items: RefreshTask[];
+  marker: string;
+}
+
+export interface PrefetchTask {
+  id: string;
+  url: string;
+  state: string;  // processing | success | failure
+  createAt: string;
+  finishAt?: string;
+}
+
+export interface PrefetchTaskListResult {
+  code: number;
+  error: string;
+  items: PrefetchTask[];
+  marker: string;
+}
+
+/** 查询刷新任务状态 */
+export async function cdnQueryRefreshTasks(
+  ak: string,
+  sk: string,
+  requestId?: string,
+  urls?: string[],
+  isDir?: "yes" | "no",
+  state?: "processing" | "success" | "failure",
+  pageNo: number = 1,
+  pageSize: number = 100
+): Promise<RefreshTaskListResult> {
+  const body: any = { pageNo, pageSize };
+  if (requestId) body.requestId = requestId;
+  if (urls && urls.length > 0) body.urls = urls;
+  if (isDir) body.isDir = isDir;
+  if (state) body.state = state;
+  
+  return fusionPost(ak, sk, "/v2/tune/refresh/list", body);
+}
+
+/** 查询预取任务状态 */
+export async function cdnQueryPrefetchTasks(
+  ak: string,
+  sk: string,
+  requestId?: string,
+  urls?: string[],
+  state?: "processing" | "success" | "failure",
+  pageNo: number = 1,
+  pageSize: number = 100
+): Promise<PrefetchTaskListResult> {
+  const body: any = { pageNo, pageSize };
+  if (requestId) body.requestId = requestId;
+  if (urls && urls.length > 0) body.urls = urls;
+  if (state) body.state = state;
+  
+  return fusionPost(ak, sk, "/v2/tune/prefetch/list", body);
+}
