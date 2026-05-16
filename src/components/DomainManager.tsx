@@ -158,11 +158,11 @@ export function DomainManager({
     return domains.find(d => d.name === selectedDomain);
   }, [domains, selectedDomain]);
 
-  const formatDate = (dateStr?: string) => {
-    if (!dateStr) return "未知";
+  const formatDate = (timestamp?: number | string) => {
+    if (!timestamp) return "未知";
     try {
-      // 尝试解析日期字符串
-      const date = new Date(dateStr);
+      // 如果是字符串，尝试解析
+      const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp * 1000);
       if (isNaN(date.getTime())) return "未知";
       return date.toLocaleString('zh-CN', {
         year: 'numeric',
@@ -518,22 +518,6 @@ export function DomainManager({
                   </div>
                 </div>
               </div>
-
-              {/* Source Configuration */}
-              {selectedDomainData.source && (
-                <div className="space-y-4">
-                  <h5 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">源站配置</h5>
-                  
-                  <div className="bg-zinc-50 dark:bg-zinc-800/50 rounded-lg p-4">
-                    <div className="flex justify-between items-start">
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400">源站地址</span>
-                      <code className="text-sm font-mono text-zinc-900 dark:text-zinc-100 break-all text-right max-w-[280px]">
-                        {selectedDomainData.source.sourceHost || selectedDomainData.source.sourceQiniuBucket || "未配置"}
-                      </code>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Footer */}
