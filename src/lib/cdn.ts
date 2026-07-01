@@ -1,6 +1,5 @@
 import CryptoJS from "crypto-js";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
-import { urlSafeBase64Encode, generateQiniuToken } from "./qiniu";
+import { urlSafeBase64Encode, generateQiniuToken, loggedFetch } from "./qiniu";
 
 // ─── QBox Auth (for fusion.qiniuapi.com) ─────────────────────────────────────
 // QBox signs only the path (+query) + "\n". JSON body does NOT participate.
@@ -17,7 +16,7 @@ function generateQBoxToken(ak: string, sk: string, pathWithQuery: string): strin
 async function fusionPost<T = any>(ak: string, sk: string, path: string, body: object): Promise<T> {
   const host = "fusion.qiniuapi.com";
   const token = generateQBoxToken(ak, sk, path);
-  const response = await tauriFetch(`https://${host}${path}`, {
+  const response = await loggedFetch(`https://${host}${path}`, {
     method: "POST",
     headers: { Authorization: token, "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -35,7 +34,7 @@ async function qiniuApiGet<T = any>(ak: string, sk: string, pathWithQuery: strin
   const host = "api.qiniu.com";
   const url = `https://${host}${pathWithQuery}`;
   const token = generateQiniuToken(ak, sk, "GET", pathWithQuery, host, "application/json");
-  const response = await tauriFetch(url, {
+  const response = await loggedFetch(url, {
     method: "GET",
     headers: { Authorization: token, "Content-Type": "application/json" },
   });

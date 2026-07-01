@@ -2,6 +2,25 @@ import CryptoJS from "crypto-js";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 
 /**
+ * 带日志的 fetch 封装
+ * 自动记录请求方法、URL、状态码和耗时
+ */
+export async function loggedFetch(url: string, options: RequestInit): Promise<Response> {
+  const method = options.method || "GET";
+  const start = performance.now();
+  try {
+    const response = await tauriFetch(url, options);
+    const duration = (performance.now() - start).toFixed(0);
+    console.log(`[HTTP] ${method} ${url} → ${response.status} (${duration}ms)`);
+    return response;
+  } catch (err) {
+    const duration = (performance.now() - start).toFixed(0);
+    console.error(`[HTTP] ${method} ${url} → FAILED (${duration}ms)`, err);
+    throw err;
+  }
+}
+
+/**
  * URL 安全的 Base64 编码
  * 七牛云要求 Base64 编码的 '+' 替换为 '-', '/' 替换为 '_'
  */
@@ -74,7 +93,7 @@ export async function fetchBuckets(ak: string, sk: string): Promise<QiniuBucket[
   
   const token = generateQiniuToken(ak, sk, "GET", path, host, "application/x-www-form-urlencoded");
 
-  const response = await tauriFetch(url, {
+  const response = await loggedFetch(url, {
     method: "GET",
     headers: {
       Authorization: token,
@@ -88,6 +107,46 @@ export async function fetchBuckets(ak: string, sk: string): Promise<QiniuBucket[
 
   const data = await response.json();
   return data as QiniuBucket[];
+}
+
+/**
+ * 快速验证 AK/SK 是否有效
+ * 先尝试 HEAD 请求（不取响应体），不支持时回退到 GET
+ */
+export async function validateCredentials(ak: string, sk: string): Promise<boolean> {
+  const host = "uc.qiniuapi.com";
+  const path = "/v3/buckets?shared=true";
+  const url = `https://${host}${path}`;
+  const headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+  };
+
+  try {
+    const headToken = generateQiniuToken(ak, sk, "HEAD", path, host, "application/x-www-form-urlencoded");
+    const headResponse = await loggedFetch(url, {
+      method: "HEAD",
+      headers: {
+        ...headers,
+        Authorization: headToken,
+      },
+    });
+    if (headResponse.ok) {
+      return true;
+    }
+  } catch {
+    // HEAD 不支持，回退到 GET
+  }
+
+  const getToken = generateQiniuToken(ak, sk, "GET", path, host, "application/x-www-form-urlencoded");
+  const getResponse = await loggedFetch(url, {
+    method: "GET",
+    headers: {
+      ...headers,
+      Authorization: getToken,
+    },
+  });
+
+  return getResponse.ok;
 }
 
 export interface QiniuFile {
@@ -137,7 +196,7 @@ export async function fetchFiles(
   const url = `https://${host}${pathWithQuery}`;
   const token = generateQiniuToken(ak, sk, "GET", pathWithQuery, host, "application/x-www-form-urlencoded");
 
-  const response = await tauriFetch(url, {
+  const response = await loggedFetch(url, {
     method: "GET",
     headers: {
       Authorization: token,
@@ -163,7 +222,7 @@ export async function fetchBucketDomains(ak: string, sk: string, bucket: string)
   
   const token = generateQiniuToken(ak, sk, "GET", pathWithQuery, host, "application/x-www-form-urlencoded");
 
-  const response = await tauriFetch(url, {
+  const response = await loggedFetch(url, {
     method: "GET",
     headers: {
       Authorization: token,
@@ -195,7 +254,7 @@ export async function deleteFile(ak: string, sk: string, bucket: string, key: st
   const token = generateQiniuToken(ak, sk, "POST", path, host, "application/x-www-form-urlencoded");
 
   try {
-    const response = await tauriFetch(url, {
+    const response = await loggedFetch(url, {
       method: "POST",
       headers: {
         Authorization: token,
@@ -223,7 +282,7 @@ export async function createBucket(ak: string, sk: string, bucket: string, regio
   const token = generateQiniuToken(ak, sk, "POST", path, host, "application/x-www-form-urlencoded");
 
   try {
-    const response = await tauriFetch(url, {
+    const response = await loggedFetch(url, {
       method: "POST",
       headers: {
         Authorization: token,
@@ -252,7 +311,7 @@ export async function deleteBucket(ak: string, sk: string, bucket: string): Prom
   const token = generateQiniuToken(ak, sk, "POST", path, host, "application/x-www-form-urlencoded");
 
   try {
-    const response = await tauriFetch(url, {
+    const response = await loggedFetch(url, {
       method: "POST",
       headers: {
         Authorization: token,
@@ -300,7 +359,7 @@ export async function batchOperations(ak: string, sk: string, ops: string[]): Pr
   const url = `https://${host}${path}`;
   const body = ops.map(op => `op=${op}`).join("&");
   const token = generateQiniuToken(ak, sk, "POST", path, host, "application/x-www-form-urlencoded", body);
-  const response = await tauriFetch(url, {
+  const response = await loggedFetch(url, {
     method: "POST",
     headers: {
       Authorization: token,
@@ -341,7 +400,7 @@ export async function renameFile(
   const path = `/move/${srcEntry}/${dstEntry}/force/true`;
   const url = `https://${host}${path}`;
   const token = generateQiniuToken(ak, sk, "POST", path, host, "application/x-www-form-urlencoded");
-  const response = await tauriFetch(url, {
+  const response = await loggedFetch(url, {
     method: "POST",
     headers: { Authorization: token, "Content-Type": "application/x-www-form-urlencoded" },
   });
@@ -400,7 +459,7 @@ export async function createFolder(
   formData.append("key", folderKey);
   formData.append("file", new Blob([]), folderKey); // 空文件
 
-  const response = await tauriFetch(`https://${uploadDomain}`, {
+  const response = await loggedFetch(`https://${uploadDomain}`, {
     method: "POST",
     body: formData,
   });
@@ -471,7 +530,7 @@ export async function fetchCdnDomains(
   const url = `https://${host}${pathWithQuery}`;
   const token = generateQiniuToken(ak, sk, "GET", pathWithQuery, host);
 
-  const response = await tauriFetch(url, {
+  const response = await loggedFetch(url, {
     method: "GET",
     headers: {
       Authorization: token,
@@ -499,7 +558,7 @@ export async function fetchCdnDomain(
   const url = `https://${host}${path}`;
   const token = generateQiniuToken(ak, sk, "GET", path, host);
 
-  const response = await tauriFetch(url, {
+  const response = await loggedFetch(url, {
     method: "GET",
     headers: {
       Authorization: token,
@@ -527,7 +586,7 @@ export async function onlineCdnDomain(
   const url = `https://${host}${path}`;
   const token = generateQiniuToken(ak, sk, "POST", path, host);
 
-  const response = await tauriFetch(url, {
+  const response = await loggedFetch(url, {
     method: "POST",
     headers: {
       Authorization: token,
@@ -552,7 +611,7 @@ export async function offlineCdnDomain(
   const url = `https://${host}${path}`;
   const token = generateQiniuToken(ak, sk, "POST", path, host);
 
-  const response = await tauriFetch(url, {
+  const response = await loggedFetch(url, {
     method: "POST",
     headers: {
       Authorization: token,
@@ -577,7 +636,7 @@ export async function deleteCdnDomain(
   const url = `https://${host}${path}`;
   const token = generateQiniuToken(ak, sk, "DELETE", path, host);
 
-  const response = await tauriFetch(url, {
+  const response = await loggedFetch(url, {
     method: "DELETE",
     headers: {
       Authorization: token,

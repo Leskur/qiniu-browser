@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { QiniuBucket } from '../lib/qiniu'
+import { QiniuBucket, fetchBuckets } from '../lib/qiniu'
 
 export type Theme = 'light' | 'dark' | 'system';
 
@@ -14,7 +14,11 @@ export interface Bookmark {
 
 interface AppState {
   buckets: QiniuBucket[];
+  bucketsLoading: boolean;
+  bucketsError: string;
   setBuckets: (buckets: QiniuBucket[]) => void;
+  loadBuckets: (ak: string, sk: string) => Promise<void>;
+  clearBuckets: () => void;
   // 计算属性
   getTotalStats: () => { totalBuckets: number; totalFiles: number; totalSize: number };
   
@@ -71,7 +75,19 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       buckets: [],
+      bucketsLoading: false,
+      bucketsError: '',
       setBuckets: (buckets) => set({ buckets }),
+      loadBuckets: async (ak, sk) => {
+        set({ bucketsLoading: true, bucketsError: '' });
+        try {
+          const data = await fetchBuckets(ak, sk);
+          set({ buckets: data, bucketsLoading: false });
+        } catch (err: any) {
+          set({ bucketsError: err.message || '获取 Bucket 列表失败', bucketsLoading: false });
+        }
+      },
+      clearBuckets: () => set({ buckets: [], bucketsLoading: false, bucketsError: '' }),
       getTotalStats: () => {
         const buckets = get().buckets;
         let totalFiles = 0;

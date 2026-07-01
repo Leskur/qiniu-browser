@@ -30,30 +30,22 @@ function formatRegion(regionCode: string) {
 }
 
 export function BucketList({
-  buckets,
   ak,
   sk,
-  loading,
-  error,
   onSelectBucket,
-  onRefresh,
   scrollPosition = 0,
   onScrollPositionRestored
 }: {
-  buckets: QiniuBucket[],
   ak: string,
   sk: string,
-  loading: boolean,
-  error: string,
   onSelectBucket: (bucket: string) => void,
-  onRefresh: () => void,
   scrollPosition?: number,
   onScrollPositionRestored?: () => void
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDesc, setSortDesc] = useState(false);
-  const { getTotalStats } = useAppStore();
+  const { buckets, bucketsLoading: loading, bucketsError: error, loadBuckets, getTotalStats } = useAppStore();
   const stats = getTotalStats();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
@@ -112,6 +104,17 @@ export function BucketList({
     return result;
   }, [buckets, searchQuery, sortField, sortDesc]);
 
+  // 自动加载 buckets
+  useEffect(() => {
+    if (buckets.length === 0 && !loading && !error) {
+      loadBuckets(ak, sk);
+    }
+  }, []);
+
+  const handleRefresh = () => {
+    loadBuckets(ak, sk);
+  };
+
   // 恢复滚动位置
   useEffect(() => {
     if (scrollPosition > 0 && !loading && processedBuckets.length > 0) {
@@ -138,7 +141,7 @@ export function BucketList({
       setNewBucketName("");
       setNewBucketRegion("z0");
       toast.success("空间创建成功");
-      onRefresh(); // 刷新列表
+      handleRefresh(); // 刷新列表
     } catch (err: any) {
       toast.error("创建失败", { description: err.message });
     } finally {
@@ -154,7 +157,7 @@ export function BucketList({
       await forceDeleteBucket(ak, sk, bucketName);
       toast.dismiss(tid);
       toast.success(`空间 ${bucketName} 已删除`);
-      onRefresh();
+      handleRefresh();
     } catch (err: any) {
       toast.dismiss(tid);
       toast.error("删除失败", { description: err.message });

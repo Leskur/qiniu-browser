@@ -140,8 +140,9 @@ use qiniu_sdk::credential::Credential;
 use qiniu_sdk::upload::{UploadManager, UploadTokenSigner, AutoUploaderObjectParams, AutoUploader, UploaderWithCallbacks};
 use std::time::Duration;
 use rayon::prelude::*;
-use std::sync::{Mutex, Arc};
+use std::sync::Mutex;
 use tauri::{Emitter, AppHandle};
+use log::{info, error};
 
 
 fn collect_files(paths: Vec<String>, prefix: &str) -> Vec<(PathBuf, String)> {
@@ -215,6 +216,7 @@ async fn upload_files(
     file_paths: Vec<String>,
     prefix: String,
 ) -> Result<UploadResult, String> {
+    info!("上传开始: bucket={}, prefix={}, files={}", bucket, prefix, file_paths.len());
     let app_clone = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let upload_manager = UploadManager::builder(
@@ -278,6 +280,7 @@ async fn upload_files(
             
             match auto_uploader.upload_path(path, auto_params) {
                 Ok(_) => {
+                    info!("上传成功: {}", key);
                     uploaded.lock().unwrap().push(key.clone());
                     // Emit success event
                     let _ = app_clone.emit("upload-progress", UploadProgressEvent {
@@ -292,6 +295,7 @@ async fn upload_files(
                     });
                 },
                 Err(e) => {
+                    error!("上传失败: {} - {}", key, e);
                     let error_msg = format!("{}: {}", key, e);
                     failed.lock().unwrap().push(error_msg.clone());
                     // Emit error event
@@ -328,6 +332,7 @@ async fn download_files_to_dir(
     items: Vec<(String, String)>, // (url, filename)
     dir: String,
 ) -> Result<DownloadResult, String> {
+    info!("批量下载开始: dir={}, files={}", dir, items.len());
     use std::sync::Arc;
     let dir_path = PathBuf::from(dir);
     let downloaded = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -548,6 +553,15 @@ fn scan_folder(folder_path: String) -> Result<ScanFolderResult, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                ])
+                .build()
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())

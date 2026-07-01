@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Plus, Trash2, LogIn, Loader2, Eye, EyeOff, ChevronRight } from "lucide-react";
-import { fetchBuckets, QiniuBucket } from "@/lib/qiniu";
+import { validateCredentials } from "@/lib/qiniu";
 
 interface HistoryItem {
   accessKey: string;
@@ -17,7 +17,7 @@ interface HistoryItem {
 
 type ViewMode = "list" | "form";
 
-export function Login({ onLogin }: { onLogin: (ak: string, sk: string, description?: string, buckets?: QiniuBucket[]) => void }) {
+export function Login({ onLogin }: { onLogin: (ak: string, sk: string, description?: string) => void }) {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -98,12 +98,12 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
 
   const doLogin = async (loginAk: string, loginSk: string, loginDescription?: string) => {
     try {
-      // 直接获取 Bucket 列表，同时验证凭证
-      const buckets = await fetchBuckets(loginAk, loginSk);
-      // 保存上次登录的账号
+      const valid = await validateCredentials(loginAk, loginSk);
+      if (!valid) {
+        throw new Error("AK/SK 无效，请检查后重试");
+      }
       localStorage.setItem('qiniu_last_login_ak', loginAk);
-      // 登录成功，传递 buckets 数据
-      onLogin(loginAk, loginSk, loginDescription, buckets);
+      onLogin(loginAk, loginSk, loginDescription);
     } catch (err: any) {
       throw new Error(err.message || "AK/SK 无效，请检查后重试");
     }

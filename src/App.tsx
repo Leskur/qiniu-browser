@@ -11,7 +11,6 @@ import { DomainManager } from "./pages/DomainManager";
 import { TransferPanel } from "./components/TransferPanel";
 import { BookmarkPage } from "./pages/BookmarkPage";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { fetchBuckets, QiniuBucket } from "./lib/qiniu";
 import { useAppStore } from "./store";
 import {
   Database, Zap, LogOut, Settings, Bookmark,
@@ -34,8 +33,6 @@ function App() {
     return saved ? JSON.parse(saved).credentials : { ak: "", sk: "", description: "" };
   });
   
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<Section>("storage");
   const [cdnSubSection, setCdnSubSection] = useState<CdnSubSection>("refresh");
@@ -49,8 +46,6 @@ function App() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [initialPrefix, setInitialPrefix] = useState<string>("");
   const [appVersion, setAppVersion] = useState<string>('...');
-
-  const { buckets, setBuckets } = useAppStore();
   
   // 持久化登录状态
   useEffect(() => {
@@ -80,30 +75,10 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
-  const handleLogin = (ak: string, sk: string, description?: string, buckets?: QiniuBucket[]) => {
+  const handleLogin = (ak: string, sk: string, description?: string) => {
     setCredentials({ ak, sk, description: description || "" });
     setIsAuthenticated(true);
-    // 如果登录时已经获取了 buckets，直接使用
-    if (buckets) {
-      setBuckets(buckets);
-    }
   };
-
-  const loadBuckets = () => {
-    setLoading(true);
-    setError("");
-    fetchBuckets(credentials.ak, credentials.sk)
-      .then(data => setBuckets(data))
-      .catch(err => setError(err.message || "获取 Bucket 列表失败"))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    // 只有在登录时没有获取到 buckets 数据时才加载
-    if (isAuthenticated && buckets.length === 0) {
-      loadBuckets();
-    }
-  }, [isAuthenticated]);
 
   // 检查更新
   const checkForUpdates = async (manual = false) => {
@@ -153,7 +128,7 @@ function App() {
             setRefreshTrigger(prev => prev + 1);
           } else {
             // 在空间列表页面，刷新空间列表
-            loadBuckets();
+            loadBuckets(credentials.ak, credentials.sk);
             toast.success('已刷新空间列表');
           }
         } else if (activeSection === 'cdn') {
@@ -168,13 +143,15 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeSection, selectedBucket]);
 
+  const { loadBuckets, clearBuckets } = useAppStore();
+
   const handleLogout = () => {
     setIsAuthenticated(false);
     setCredentials({ ak: "", sk: "", description: "" });
     setSelectedBucket(null);
     setActiveSection("storage");
     setShowAccountMenu(false);
-    setBuckets([]); // 清空 buckets
+    clearBuckets();
     localStorage.removeItem('qiniu_session'); // 清除会话
     localStorage.removeItem('qiniu_last_login_ak'); // 清除自动登录记录
     localStorage.removeItem('qiniu_auto_login'); // 清除自动登录标记
@@ -371,11 +348,8 @@ function App() {
                 ) : (
                   <div className="h-full p-5 flex flex-col">
                     <BucketList
-                      buckets={buckets}
                       ak={credentials.ak}
                       sk={credentials.sk}
-                      loading={loading}
-                      error={error}
                       onSelectBucket={(bucket) => {
                         // 保存当前滚动位置
                         const scrollArea = document.querySelector('[data-radix-scroll-area-viewport]');
@@ -385,7 +359,6 @@ function App() {
                         setInitialPrefix("");
                         setSelectedBucket(bucket);
                       }}
-                      onRefresh={loadBuckets}
                       scrollPosition={bucketListScrollPos}
                       onScrollPositionRestored={() => setBucketListScrollPos(0)}
                     />
