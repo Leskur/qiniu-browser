@@ -10,15 +10,16 @@ import { BucketList } from "./components/BucketList";
 import { CdnManager } from "./components/CdnManager";
 import { DomainManager } from "./components/DomainManager";
 import { TransferPanel } from "./components/TransferPanel";
+import { BookmarkPage } from "./components/BookmarkPage";
 import { fetchBuckets, QiniuBucket } from "./lib/qiniu";
 import { useAppStore, Theme } from "./store";
 import {
-  Database, Zap, LogOut, Settings,
-  Sun, Moon, Monitor, Cat, Download
+  Database, Zap, LogOut, Settings, Bookmark,
+  Sun, Moon, Monitor, Cat, Download, X, Folder
 } from "lucide-react";
 import "./App.css";
 
-type Section = "storage" | "cdn" | "settings";
+type Section = "storage" | "bookmarks" | "cdn" | "settings";
 type CdnSubSection = "refresh" | "domains";
 
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
@@ -233,6 +234,7 @@ function App() {
   const [memoryMB, setMemoryMB] = useState<number | null>(null);
   const [bucketListScrollPos, setBucketListScrollPos] = useState(0);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [initialPrefix, setInitialPrefix] = useState<string>("");
 
   const { buckets, setBuckets } = useAppStore();
   
@@ -389,6 +391,7 @@ function App() {
 
   const navItems: { id: Section; label: string; icon: typeof Database; desc: string }[] = [
     { id: "storage", label: "空间管理", icon: Database, desc: "对象存储 · 文件" },
+    { id: "bookmarks", label: "书签", icon: Bookmark, desc: "快速访问 · 常用路径" },
     { id: "cdn",     label: "CDN",     icon: Zap,      desc: "刷新 · 预取" },
     { id: "settings",label: "设置",    icon: Settings,  desc: "外观 · 偏好" },
   ];
@@ -538,8 +541,10 @@ function App() {
                       ak={credentials.ak}
                       sk={credentials.sk}
                       bucket={selectedBucket}
-                      onBack={() => setSelectedBucket(null)}
+                      onBack={() => { setSelectedBucket(null); setInitialPrefix(""); }}
                       refreshTrigger={refreshTrigger}
+                      initialPrefix={initialPrefix}
+                      onInitialPrefixUsed={() => setInitialPrefix("")}
                     />
                   </div>
                 ) : (
@@ -556,6 +561,7 @@ function App() {
                         if (scrollArea) {
                           setBucketListScrollPos(scrollArea.scrollTop);
                         }
+                        setInitialPrefix("");
                         setSelectedBucket(bucket);
                       }}
                       onRefresh={loadBuckets}
@@ -564,6 +570,16 @@ function App() {
                     />
                   </div>
                 )}
+              </div>
+              <div className={activeSection === "bookmarks" ? "h-full" : "hidden"}>
+                <BookmarkPage
+                  ak={credentials.ak}
+                  onNavigate={(bucket, prefix) => {
+                    setInitialPrefix(prefix);
+                    setSelectedBucket(bucket);
+                    setActiveSection("storage");
+                  }}
+                />
               </div>
               <div className={activeSection === "cdn" ? "h-full flex flex-col" : "hidden"}>
                 {/* CDN Sub Navigation */}

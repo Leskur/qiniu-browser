@@ -6,7 +6,7 @@ import {
   File, Image, Film, FileText, Archive,
   Link2, Check, RefreshCw, Trash2, Upload, FolderOpen,
   Folder, ChevronRight, AlertCircle, Database, Download, X, Square, CheckSquare, ArrowUpDown, ArrowUp, ArrowDown, Pencil, ArrowLeft, ArrowRight,
-  HardDrive, FileBox, Search, FolderPlus, ZoomIn, ChevronLeft, Maximize2
+  HardDrive, FileBox, Search, FolderPlus, ZoomIn, ChevronLeft, Maximize2, Bookmark
 } from "lucide-react";
 import { toast } from "sonner";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -58,8 +58,9 @@ type VirtualEntry =
   | { type: 'folder'; name: string; prefix: string }
   | { type: 'file'; name: string; file: QiniuFile };
 
-export function FileManager({ ak, sk, bucket, onBack, refreshTrigger }: {
+export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPrefix, onInitialPrefixUsed }: {
   ak: string; sk: string; bucket: string; onBack: () => void; refreshTrigger?: number;
+  initialPrefix?: string; onInitialPrefixUsed?: () => void;
 }) {
   const [domains, setDomains] = useState<string[]>([]);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -646,6 +647,31 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger }: {
     }
   }, [refreshTrigger]);
 
+  // ── 书签：从外部跳转到指定 prefix ──
+  const addBookmark = useAppStore((s) => s.addBookmark);
+  const bookmarkList = useAppStore((s) => s.bookmarks[ak] || []);
+  const [showBookmarkDialog, setShowBookmarkDialog] = useState(false);
+  const [bookmarkLabel, setBookmarkLabel] = useState("");
+
+  useEffect(() => {
+    if (initialPrefix !== undefined && initialPrefix !== "") {
+      navigate(initialPrefix);
+      onInitialPrefixUsed?.();
+    }
+  }, [initialPrefix]);
+
+  const handleAddBookmark = () => {
+    const label = bookmarkLabel.trim() || `${bucket}/${currentPrefix || ""}`;
+    addBookmark(ak, { bucket, prefix: currentPrefix, label });
+    toast.success("书签已添加", { description: label });
+    setShowBookmarkDialog(false);
+    setBookmarkLabel("");
+  };
+
+  const isCurrentBookmarked = useMemo(() => {
+    return bookmarkList.some(b => b.bucket === bucket && b.prefix === currentPrefix);
+  }, [bookmarkList, bucket, currentPrefix]);
+
   const rowVirtualizer = useVirtualizer({
     count: sortedEntries.length,
     getScrollElement: () => scrollContainerRef.current,
@@ -1073,6 +1099,20 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger }: {
             className={`p-2 rounded-lg transition-colors ${searchActive || searchQuery ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'}`}
           >
             <Search className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => {
+              if (isCurrentBookmarked) {
+                toast.info("当前位置已在书签中");
+                return;
+              }
+              setBookmarkLabel(`${bucket}${currentPrefix ? "/" + currentPrefix.replace(/\/$/, "") : ""}`);
+              setShowBookmarkDialog(true);
+            }}
+            title="添加书签"
+            className={`p-2 rounded-lg transition-colors ${isCurrentBookmarked ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' : 'text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'}`}
+          >
+            <Bookmark className="w-4 h-4" fill={isCurrentBookmarked ? "currentColor" : "none"} />
           </button>
           <button
             onClick={() => handleUpload(false)}
@@ -1614,6 +1654,49 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger }: {
           onConfirm={handleFolderUploadConfirm}
           onCancel={() => setFolderUploadPath(null)}
         />
+      )}
+
+      {/* ── Bookmark Dialog ── */}
+      {showBookmarkDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-zinc-900 w-full max-w-sm rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 p-6 mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                <Bookmark className="w-5 h-5 text-amber-500" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-800 dark:text-zinc-100">添加书签</h3>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">{bucket}{currentPrefix ? " / " + currentPrefix.replace(/\/$/, "") : ""}</p>
+              </div>
+            </div>
+            <input
+              autoFocus
+              type="text"
+              value={bookmarkLabel}
+              onChange={e => setBookmarkLabel(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleAddBookmark();
+                if (e.key === 'Escape') { setShowBookmarkDialog(false); setBookmarkLabel(""); }
+              }}
+              placeholder="书签名称（如：产品图片库）"
+              className="w-full px-3 py-2 text-sm text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 mb-5"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setShowBookmarkDialog(false); setBookmarkLabel(""); }}
+                className="flex-1 px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleAddBookmark}
+                className="flex-1 px-4 py-2 text-sm font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-xl transition-colors"
+              >
+                确认添加
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

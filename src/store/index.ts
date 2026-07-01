@@ -4,6 +4,14 @@ import { QiniuBucket } from '../lib/qiniu'
 
 export type Theme = 'light' | 'dark' | 'system';
 
+export interface Bookmark {
+  id: string;
+  bucket: string;
+  prefix: string;
+  label: string;
+  createdAt: number;
+}
+
 interface AppState {
   buckets: QiniuBucket[];
   setBuckets: (buckets: QiniuBucket[]) => void;
@@ -30,6 +38,12 @@ interface AppState {
   // 通知设置
   notifyOnComplete: boolean;
   setNotifyOnComplete: (notify: boolean) => void;
+
+  // 书签（按 AK 隔离）
+  bookmarks: Record<string, Bookmark[]>;
+  addBookmark: (ak: string, bookmark: Omit<Bookmark, 'id' | 'createdAt'>) => void;
+  removeBookmark: (ak: string, id: string) => void;
+  getBookmarks: (ak: string) => Bookmark[];
 }
 
 /**
@@ -120,6 +134,29 @@ export const useAppStore = create<AppState>()(
       // 通知设置
       notifyOnComplete: true,
       setNotifyOnComplete: (notify) => set({ notifyOnComplete: notify }),
+
+      // 书签（按 AK 隔离）
+      bookmarks: {},
+      addBookmark: (ak, bookmark) => {
+        const id = crypto.randomUUID();
+        const newBookmark: Bookmark = { ...bookmark, id, createdAt: Date.now() };
+        set((state) => {
+          const list = state.bookmarks[ak] || [];
+          // 避免重复：相同 bucket + prefix 的不重复添加
+          const exists = list.some(b => b.bucket === bookmark.bucket && b.prefix === bookmark.prefix);
+          if (exists) return state;
+          return { bookmarks: { ...state.bookmarks, [ak]: [...list, newBookmark] } };
+        });
+      },
+      removeBookmark: (ak, id) => {
+        set((state) => {
+          const list = state.bookmarks[ak] || [];
+          return { bookmarks: { ...state.bookmarks, [ak]: list.filter(b => b.id !== id) } };
+        });
+      },
+      getBookmarks: (ak) => {
+        return get().bookmarks[ak] || [];
+      },
     }),
     {
       name: 'qiniu-browser-settings',
@@ -129,6 +166,7 @@ export const useAppStore = create<AppState>()(
         itemsPerPage: state.itemsPerPage,
         cacheExpireMinutes: state.cacheExpireMinutes,
         notifyOnComplete: state.notifyOnComplete,
+        bookmarks: state.bookmarks,
       }),
       onRehydrateStorage: () => {
         return (state) => {
