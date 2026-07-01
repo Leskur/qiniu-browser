@@ -649,7 +649,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
   // ── 书签：从外部跳转到指定 prefix ──
   const addBookmark = useAppStore((s) => s.addBookmark);
-  const bookmarkList = useAppStore((s) => s.bookmarks[ak] || []);
+  const bookmarkList = useAppStore((s) => s.bookmarks[ak]) ?? [];
   const [showBookmarkDialog, setShowBookmarkDialog] = useState(false);
   const [bookmarkLabel, setBookmarkLabel] = useState("");
 
@@ -1057,23 +1057,6 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
           </div>
         ) : (
         <div className="flex items-center gap-2 shrink-0 ml-2">
-          {!loading && bucketInfo && (
-            <div className="hidden md:flex items-center gap-3 text-xs text-zinc-400 dark:text-zinc-500 tabular-nums mr-1">
-              <span className="flex items-center gap-1">
-                <FileBox className="w-3.5 h-3.5 text-zinc-400" />
-                {bucketInfo.file_num.toLocaleString()} 个文件
-              </span>
-              <span className="flex items-center gap-1">
-                <HardDrive className="w-3.5 h-3.5 text-zinc-400" />
-                {formatBytes(bucketInfo.storage_size)}
-              </span>
-            </div>
-          )}
-          {!loading && !bucketInfo && (
-            <span className="text-xs text-zinc-400 hidden md:block tabular-nums">
-              {items.length} 项
-            </span>
-          )}
           <button
             onClick={() => {
               const now = Date.now();
@@ -1106,7 +1089,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                 toast.info("当前位置已在书签中");
                 return;
               }
-              setBookmarkLabel(`${bucket}${currentPrefix ? "/" + currentPrefix.replace(/\/$/, "") : ""}`);
+              setBookmarkLabel("");
               setShowBookmarkDialog(true);
             }}
             title="添加书签"
@@ -1144,6 +1127,26 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
         </div>
         )}
       </div>
+
+      {/* ── Stats Bar ── */}
+      {!loading && !someSelected && (bucketInfo || items.length > 0) && (
+        <div className="flex items-center gap-4 px-6 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 text-xs text-zinc-400 dark:text-zinc-500 tabular-nums shrink-0">
+          {bucketInfo ? (
+            <>
+              <span className="flex items-center gap-1">
+                <FileBox className="w-3.5 h-3.5" />
+                {bucketInfo.file_num.toLocaleString()} 个文件
+              </span>
+              <span className="flex items-center gap-1">
+                <HardDrive className="w-3.5 h-3.5" />
+                {formatBytes(bucketInfo.storage_size)}
+              </span>
+            </>
+          ) : (
+            <span>{items.length} 项</span>
+          )}
+        </div>
+      )}
 
       {/* ── Search Bar ── */}
       {searchActive && (
@@ -1345,7 +1348,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                           <Download className="w-4 h-4" />
                         </button>
                         <button onClick={(e) => handleCopyLink(e, file.key)}
-                          className={`text-xs font-medium px-2 py-1.5 rounded-md transition-all flex items-center gap-1
+                          className={`text-xs font-medium px-2 py-1.5 rounded-md transition-all flex items-center gap-1 whitespace-nowrap shrink-0
                             ${copiedKey === file.key
                               ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
                               : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 opacity-0 group-hover:opacity-100'}`}>

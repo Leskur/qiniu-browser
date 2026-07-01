@@ -357,6 +357,8 @@ function App() {
     setShowAccountMenu(false);
     setBuckets([]); // 清空 buckets
     localStorage.removeItem('qiniu_session'); // 清除会话
+    localStorage.removeItem('qiniu_last_login_ak'); // 清除自动登录记录
+    localStorage.removeItem('qiniu_auto_login'); // 清除自动登录标记
   };
 
   // 侧边栏拖拽调整宽度

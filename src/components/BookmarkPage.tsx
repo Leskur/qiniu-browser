@@ -11,7 +11,7 @@ export function BookmarkPage({
   onNavigate: (bucket: string, prefix: string) => void;
 }) {
   const removeBookmark = useAppStore((s) => s.removeBookmark);
-  const bookmarks = useAppStore((s) => s.bookmarks[ak] || []);
+  const bookmarks = useAppStore((s) => s.bookmarks[ak]) ?? [];
   const [searchQuery, setSearchQuery] = useState("");
 
   const filtered = bookmarks.filter(
