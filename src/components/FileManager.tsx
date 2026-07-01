@@ -661,7 +661,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   }, [initialPrefix]);
 
   const handleAddBookmark = () => {
-    const label = bookmarkLabel.trim() || `${bucket}/${currentPrefix || ""}`;
+    const label = bookmarkLabel.trim() || (currentPrefix ? `${bucket}/${currentPrefix.replace(/\/$/, "")}` : bucket);
     addBookmark(ak, { bucket, prefix: currentPrefix, label });
     toast.success("书签已添加", { description: label });
     setShowBookmarkDialog(false);

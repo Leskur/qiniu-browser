@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useAppStore } from "../store";
-import { Bookmark as BookmarkIcon, X } from "lucide-react";
+import { Bookmark as BookmarkIcon, X, Pencil } from "lucide-react";
 import { toast } from "sonner";
+
+type EditingState = { id: string; label: string } | null;
 
 export function BookmarkPage({
   ak,
@@ -11,8 +13,10 @@ export function BookmarkPage({
   onNavigate: (bucket: string, prefix: string) => void;
 }) {
   const removeBookmark = useAppStore((s) => s.removeBookmark);
+  const updateBookmark = useAppStore((s) => s.updateBookmark);
   const bookmarks = useAppStore((s) => s.bookmarks[ak]) ?? [];
   const [searchQuery, setSearchQuery] = useState("");
+  const [editing, setEditing] = useState<EditingState>(null);
 
   const filtered = bookmarks.filter(
     (bm) =>
@@ -29,7 +33,7 @@ export function BookmarkPage({
         </div>
         <p className="text-lg font-semibold text-zinc-600 dark:text-zinc-300">还没有书签</p>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-2 max-w-xs">
-          在文件管理页面点击星标按钮，将常用的空间路径保存为书签，方便下次快速访问
+          在文件管理页面点击书签按钮，将常用的空间路径保存为书签，方便下次快速访问
         </p>
       </div>
     );
@@ -92,6 +96,16 @@ export function BookmarkPage({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    setEditing({ id: bm.id, label: bm.label });
+                  }}
+                  className="p-1.5 rounded text-zinc-300 dark:text-zinc-600 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors opacity-0 group-hover:opacity-100 shrink-0 cursor-pointer"
+                  title="编辑书签"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
                     removeBookmark(ak, bm.id);
                     toast.success("书签已删除");
                   }}
@@ -105,6 +119,61 @@ export function BookmarkPage({
           </div>
         )}
       </div>
+
+      {/* ── Edit Dialog ── */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-zinc-900 w-full max-w-sm rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 p-6 mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                <Pencil className="w-5 h-5 text-amber-500" />
+              </div>
+              <h3 className="text-base font-bold text-zinc-800 dark:text-zinc-100">编辑书签</h3>
+            </div>
+            <div className="space-y-3 mb-5">
+              <div>
+                <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1 block">名称</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={editing.label}
+                  onChange={(e) => setEditing({ ...editing, label: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const label = editing.label.trim() || "未命名书签";
+                      updateBookmark(ak, editing.id, { label });
+                      toast.success("书签已更新");
+                      setEditing(null);
+                    }
+                    if (e.key === 'Escape') setEditing(null);
+                  }}
+                  placeholder="书签名称"
+                  className="w-full px-3 py-2 text-sm text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400 placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setEditing(null)}
+                className="flex-1 px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  const label = editing.label.trim() || "未命名书签";
+                  updateBookmark(ak, editing.id, { label });
+                  toast.success("书签已更新");
+                  setEditing(null);
+                }}
+                className="flex-1 px-4 py-2 text-sm font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-xl transition-colors"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

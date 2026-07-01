@@ -43,6 +43,7 @@ interface AppState {
   bookmarks: Record<string, Bookmark[]>;
   addBookmark: (ak: string, bookmark: Omit<Bookmark, 'id' | 'createdAt'>) => void;
   removeBookmark: (ak: string, id: string) => void;
+  updateBookmark: (ak: string, id: string, updates: Partial<Pick<Bookmark, 'label' | 'bucket' | 'prefix'>>) => void;
   getBookmarks: (ak: string) => Bookmark[];
 }
 
@@ -152,6 +153,12 @@ export const useAppStore = create<AppState>()(
         set((state) => {
           const list = state.bookmarks[ak] || [];
           return { bookmarks: { ...state.bookmarks, [ak]: list.filter(b => b.id !== id) } };
+        });
+      },
+      updateBookmark: (ak, id, updates) => {
+        set((state) => {
+          const list = state.bookmarks[ak] || [];
+          return { bookmarks: { ...state.bookmarks, [ak]: list.map(b => b.id === id ? { ...b, ...updates } : b) } };
         });
       },
       getBookmarks: (ak) => {
