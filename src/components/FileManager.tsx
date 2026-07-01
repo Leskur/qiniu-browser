@@ -31,11 +31,11 @@ export function formatQiniuTime(putTime: number) {
 }
 
 export function getFileIcon(mimeType: string) {
-  if (mimeType?.startsWith('image/')) return <Image className="w-4 h-4 text-emerald-500" />;
-  if (mimeType?.startsWith('video/')) return <Film className="w-4 h-4 text-purple-500" />;
-  if (mimeType?.startsWith('text/')) return <FileText className="w-4 h-4 text-blue-400" />;
-  if (mimeType?.includes('zip') || mimeType?.includes('tar') || mimeType?.includes('rar')) return <Archive className="w-4 h-4 text-amber-500" />;
-  return <File className="w-4 h-4 text-zinc-400" />;
+  if (mimeType?.startsWith('image/')) return <Image className="w-4 h-4 text-emerald-500 shrink-0" />;
+  if (mimeType?.startsWith('video/')) return <Film className="w-4 h-4 text-purple-500 shrink-0" />;
+  if (mimeType?.startsWith('text/')) return <FileText className="w-4 h-4 text-blue-400 shrink-0" />;
+  if (mimeType?.includes('zip') || mimeType?.includes('tar') || mimeType?.includes('rar')) return <Archive className="w-4 h-4 text-amber-500 shrink-0" />;
+  return <File className="w-4 h-4 text-zinc-400 shrink-0" />;
 }
 
 // ─── Highlight matching text ──────────────────────────────────────────────────
@@ -1225,8 +1225,8 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                   <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap pl-4 w-10">
                     <button onClick={toggleSelectAll} className="p-0.5 text-zinc-400 hover:text-emerald-500 transition-colors">
                       {allSelected
-                        ? <CheckSquare className="w-4 h-4 text-emerald-500" />
-                        : <Square className="w-4 h-4" />}
+                        ? <CheckSquare className="w-4 h-4 text-emerald-500 shrink-0" />
+                        : <Square className="w-4 h-4 shrink-0" />}
                     </button>
                   </th>
                   <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap pl-1">
@@ -1274,7 +1274,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                       <div className="pl-4 w-10 shrink-0" />
                       <div className="flex-1 pl-1 flex items-center gap-3 min-w-0">
                         <Folder className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span className="font-medium text-zinc-700 dark:text-zinc-200 truncate">
+                        <span className="font-medium text-zinc-700 dark:text-zinc-200 truncate w-full min-w-0">
                           <HighlightText text={entry.name} query={searchQuery} />
                         </span>
                       </div>
@@ -1317,8 +1317,8 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                     <div className="pl-4 w-10 shrink-0" onClick={e => toggleSelect(file.key, e)}>
                       <button className="p-0.5 text-zinc-400 hover:text-emerald-500 transition-colors">
                         {isChecked
-                          ? <CheckSquare className="w-4 h-4 text-emerald-500" />
-                          : <Square className="w-4 h-4 opacity-0 group-hover:opacity-100" />}
+                          ? <CheckSquare className="w-4 h-4 text-emerald-500 shrink-0" />
+                          : <Square className="w-4 h-4 opacity-0 group-hover:opacity-100 shrink-0" />}
                       </button>
                     </div>
                     <div className="flex-1 pl-1 flex items-center gap-3 min-w-0">
@@ -1329,10 +1329,10 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                           onBlur={() => commitRename(file.key)}
                           onKeyDown={e => { if (e.key === 'Enter') commitRename(file.key); if (e.key === 'Escape') setRenamingKey(null); }}
                           onClick={e => e.stopPropagation()}
-                          className="flex-1 max-w-[220px] px-2 py-0.5 text-sm rounded border border-emerald-400 dark:border-emerald-600 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-emerald-400/40"
+                          className="flex-1 w-full min-w-0 px-2 py-0.5 text-sm rounded border border-emerald-400 dark:border-emerald-600 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-emerald-400/40"
                         />
                       ) : (
-                        <span className="truncate max-w-[240px] text-zinc-700 dark:text-zinc-200" title={file.key}>
+                        <span className="truncate w-full min-w-0 text-zinc-700 dark:text-zinc-200" title={file.key}>
                           <HighlightText text={entry.name} query={searchQuery} />
                         </span>
                       )}

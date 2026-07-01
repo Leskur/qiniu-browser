@@ -28,7 +28,7 @@ const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "跟随系统", icon: Monitor },
 ];
 
-function SettingsPanel({ onCheckUpdate }: { onCheckUpdate: () => void }) {
+function SettingsPanel({ onCheckUpdate, appVersion }: { onCheckUpdate: () => void; appVersion: string }) {
   const { 
     theme, setTheme,
     itemsPerPage, setItemsPerPage,
@@ -36,7 +36,6 @@ function SettingsPanel({ onCheckUpdate }: { onCheckUpdate: () => void }) {
   } = useAppStore();
   
   const [cacheSize, setCacheSize] = useState<string>('计算中...');
-  const [appVersion, setAppVersion] = useState<string>('...');
   const [confirmClear, setConfirmClear] = useState(false);
 
   const calcCacheSize = () => {
@@ -57,7 +56,6 @@ function SettingsPanel({ onCheckUpdate }: { onCheckUpdate: () => void }) {
 
   useEffect(() => {
     calcCacheSize();
-    getVersion().then(v => setAppVersion(v)).catch(() => setAppVersion('未知'));
   }, []);
 
   const handleClearCache = () => {
@@ -235,6 +233,7 @@ function App() {
   const [bucketListScrollPos, setBucketListScrollPos] = useState(0);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [initialPrefix, setInitialPrefix] = useState<string>("");
+  const [appVersion, setAppVersion] = useState<string>('...');
 
   const { buckets, setBuckets } = useAppStore();
   
@@ -249,6 +248,11 @@ function App() {
       localStorage.removeItem('qiniu_session');
     }
   }, [isAuthenticated, credentials]);
+
+  // ── App version ──
+  useEffect(() => {
+    getVersion().then(v => setAppVersion(v)).catch(() => setAppVersion('未知'));
+  }, []);
 
   // ── Memory usage polling ──
   useEffect(() => {
@@ -635,7 +639,7 @@ function App() {
                 </div>
               </div>
               <div className={activeSection === "settings" ? "h-full" : "hidden"}>
-                <SettingsPanel onCheckUpdate={() => checkForUpdates(true)} />
+                <SettingsPanel onCheckUpdate={() => checkForUpdates(true)} appVersion={appVersion} />
               </div>
             </div>
           </div>
