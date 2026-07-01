@@ -1134,16 +1134,21 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
           {bucketInfo ? (
             <>
               <span className="flex items-center gap-1">
+                <Database className="w-3.5 h-3.5" />
+                <strong className="font-medium text-zinc-500 dark:text-zinc-400">{bucket}</strong>
+              </span>
+              <span className="text-zinc-300 dark:text-zinc-600">|</span>
+              <span className="flex items-center gap-1">
                 <FileBox className="w-3.5 h-3.5" />
-                {bucketInfo.file_num.toLocaleString()} 个文件
+                文件数：<strong className="font-medium text-zinc-500 dark:text-zinc-400">{bucketInfo.file_num.toLocaleString()}</strong>
               </span>
               <span className="flex items-center gap-1">
                 <HardDrive className="w-3.5 h-3.5" />
-                {formatBytes(bucketInfo.storage_size)}
+                存储占用：<strong className="font-medium text-zinc-500 dark:text-zinc-400">{formatBytes(bucketInfo.storage_size)}</strong>
               </span>
             </>
           ) : (
-            <span>{items.length} 项</span>
+            <span>当前目录：<strong className="font-medium text-zinc-500 dark:text-zinc-400">{items.length}</strong> 项</span>
           )}
         </div>
       )}
