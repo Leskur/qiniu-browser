@@ -5,7 +5,7 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { getVersion } from '@tauri-apps/api/app';
 import { Login } from "./pages/Login";
 import { FileManager } from "./pages/FileManager";
-import { BucketList } from "./pages/BucketList";
+import { BucketList } from "./pages/bucket-list/BucketList";
 import { CdnManager } from "./pages/CdnManager";
 import { DomainManager } from "./pages/DomainManager";
 import { TransferPanel } from "./components/TransferPanel";
@@ -320,15 +320,6 @@ function App() {
 
           {/* ── Main ── */}
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-            {/* Top bar (Only for storage) */}
-            {activeSection === "storage" && !selectedBucket && (
-              <header className="shrink-0 flex items-center gap-2 px-6 py-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm relative z-20">
-                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
-                  空间管理
-                </span>
-              </header>
-            )}
-
             {/* Content — always mounted, visibility toggled to preserve state */}
             <div className="flex-1 overflow-hidden relative z-10">
               <div className={`h-full relative flex flex-col ${activeSection === "storage" ? "" : "hidden"}`}>
@@ -345,7 +336,7 @@ function App() {
                     />
                   </div>
                 ) : (
-                  <div className="h-full p-5 flex flex-col">
+                  <div className="h-full flex flex-col">
                     <BucketList
                       ak={credentials.ak}
                       sk={credentials.sk}

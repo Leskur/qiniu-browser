@@ -15,9 +15,11 @@ export interface Bookmark {
 interface AppState {
   buckets: QiniuBucket[];
   bucketsLoading: boolean;
+  bucketsRefreshing: boolean;
   bucketsError: string;
   setBuckets: (buckets: QiniuBucket[]) => void;
   loadBuckets: (ak: string, sk: string) => Promise<void>;
+  refreshBuckets: (ak: string, sk: string) => Promise<void>;
   clearBuckets: () => void;
   // 计算属性
   getTotalStats: () => { totalBuckets: number; totalFiles: number; totalSize: number };
@@ -76,6 +78,7 @@ export const useAppStore = create<AppState>()(
     (set, get) => ({
       buckets: [],
       bucketsLoading: false,
+      bucketsRefreshing: false,
       bucketsError: '',
       setBuckets: (buckets) => set({ buckets }),
       loadBuckets: async (ak, sk) => {
@@ -87,7 +90,16 @@ export const useAppStore = create<AppState>()(
           set({ bucketsError: err.message || '获取 Bucket 列表失败', bucketsLoading: false });
         }
       },
-      clearBuckets: () => set({ buckets: [], bucketsLoading: false, bucketsError: '' }),
+      refreshBuckets: async (ak, sk) => {
+        set({ bucketsRefreshing: true, bucketsError: '' });
+        try {
+          const data = await fetchBuckets(ak, sk);
+          set({ buckets: data, bucketsRefreshing: false });
+        } catch (err: any) {
+          set({ bucketsError: err.message || '获取 Bucket 列表失败', bucketsRefreshing: false });
+        }
+      },
+      clearBuckets: () => set({ buckets: [], bucketsLoading: false, bucketsRefreshing: false, bucketsError: '' }),
       getTotalStats: () => {
         const buckets = get().buckets;
         let totalFiles = 0;

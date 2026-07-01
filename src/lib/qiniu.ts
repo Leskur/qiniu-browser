@@ -72,6 +72,7 @@ export interface QiniuBucket {
   file_num: number;
   storage_size: number;
   ctime: number;
+  private: number;
 }
 
 /**
