@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { QiniuBucket, createBucket, forceDeleteBucket } from "../lib/qiniu";
-import { formatSize, formatDate } from "../lib/utils";
-import { ScrollArea } from "./ui/scroll-area";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { formatBytes, formatDate } from "../lib/utils";
+import { ScrollArea } from "../components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { ArrowUpDown, ArrowUp, ArrowDown, Database, HardDrive, FileBox, Plus, Trash2 } from "lucide-react";
 import { useAppStore } from "../store";
 import { toast } from "sonner";
@@ -179,7 +179,7 @@ export function BucketList({
               </div>
               <div className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800/50 px-2.5 py-1 rounded-md border border-zinc-200/50 dark:border-zinc-700/50">
                 <HardDrive className="w-4 h-4 text-amber-500" />
-                <span>已用 <strong className="text-zinc-700 dark:text-zinc-300 font-semibold">{formatSize(stats.totalSize)}</strong></span>
+                <span>已用 <strong className="text-zinc-700 dark:text-zinc-300 font-semibold">{formatBytes(stats.totalSize)}</strong></span>
               </div>
             </div>
           )}
@@ -288,7 +288,7 @@ export function BucketList({
                     {bucket.file_num < 0 ? '-' : bucket.file_num.toLocaleString()}
                   </td>
                   <td className="px-6 py-4 text-zinc-600 dark:text-zinc-400 text-center font-mono text-xs">
-                    {formatSize(bucket.storage_size)}
+                    {formatBytes(bucket.storage_size)}
                   </td>
                   <td className="px-6 py-4 text-zinc-500 text-xs text-center font-mono">
                     {formatDate(bucket.ctime)}

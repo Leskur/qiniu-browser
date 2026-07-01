@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { X, Folder, File, CheckSquare, Square, Loader2 } from "lucide-react";
-import { formatBytes } from "./FileManager";
+import { formatBytes } from "../lib/utils";
 import { ScrollArea } from "./ui/scroll-area";
 import { Checkbox } from "./ui/checkbox";
 

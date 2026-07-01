@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchFiles, fetchBucketDomains, QiniuFile, deleteFile, deleteDirectory, generateDownloadUrl, batchDeleteFiles, renameFile, createFolder } from "../lib/qiniu";
-import { Skeleton } from "./ui/skeleton";
+import { Skeleton } from "../components/ui/skeleton";
 import {
   File, Image, Film, FileText, Archive,
   Link2, Check, RefreshCw, Trash2, Upload, FolderOpen,
@@ -12,23 +12,10 @@ import { toast } from "sonner";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { FolderUploadDialog } from "./FolderUploadDialog";
+import { FolderUploadDialog } from "../components/FolderUploadDialog";
 import { useTransferStore } from "../store/transfer";
 import { useAppStore } from "../store";
-
-export function formatBytes(bytes: number, decimals = 2) {
-  if (!+bytes) return '0 Bytes'
-  const k = 1024
-  const dm = decimals < 0 ? 0 : decimals
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
-}
-
-export function formatQiniuTime(putTime: number) {
-  const date = new Date(putTime / 10000);
-  return date.toLocaleString();
-}
+import { formatBytes, formatQiniuTime } from "../lib/utils";
 
 export function getFileIcon(mimeType: string) {
   if (mimeType?.startsWith('image/')) return <Image className="w-4 h-4 text-emerald-500 shrink-0" />;

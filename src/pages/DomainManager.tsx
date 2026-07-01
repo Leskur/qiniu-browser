@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { fetchCdnDomains, CdnDomain } from "../lib/qiniu";
 import { RefreshCw, Globe, Copy, Check, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Search, X, Zap, Info, Calendar, Server } from "lucide-react";
-import { Skeleton } from "./ui/skeleton";
+import { Skeleton } from "../components/ui/skeleton";
 
 type SortField = 'name' | 'status' | 'protocol' | 'geoCover';
 type SortDirection = 'asc' | 'desc';

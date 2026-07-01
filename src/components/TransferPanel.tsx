@@ -1,6 +1,6 @@
 import { useTransferStore, TransferTask } from "../store/transfer";
 import { X, ChevronDown, ChevronUp, Upload, Download, Check, AlertCircle, Trash2, Loader2 } from "lucide-react";
-import { formatBytes } from "./FileManager";
+import { formatBytes } from "../lib/utils";
 import { ScrollArea } from "./ui/scroll-area";
 
 function formatSpeed(bytesPerSecond: number): string {
