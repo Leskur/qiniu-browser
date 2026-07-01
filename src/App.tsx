@@ -189,7 +189,7 @@ function App() {
 
   const navItems: { id: Section; label: string; icon: typeof Database; desc: string }[] = [
     { id: "storage", label: "空间管理", icon: Database, desc: "对象存储 · 文件" },
-    { id: "bookmarks", label: "书签", icon: Bookmark, desc: "快速访问 · 常用路径" },
+    { id: "bookmarks", label: "书签管理", icon: Bookmark, desc: "快速访问 · 常用路径" },
     { id: "cdn",     label: "CDN",     icon: Zap,      desc: "刷新 · 预取" },
     { id: "settings",label: "设置",    icon: Settings,  desc: "外观 · 偏好" },
   ];
@@ -210,9 +210,8 @@ function App() {
             className="shrink-0 flex flex-col bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 relative"
             style={{ width: `${sidebarWidth}px` }}
           >
-            {/* Logo */}
             <div className="flex items-center gap-2.5 px-4 py-4 shrink-0">
-              <img src="/logo.png" alt="Qiniu" className="h-7 w-7 object-contain shrink-0" />
+              <img src="/logo.png" alt="Qiniu" className="h-7 w-7 object-contain shrink-0 rounded-[6px]" />
               <span className="text-sm font-bold text-zinc-800 dark:text-zinc-100 truncate tracking-tight">Qiniu Browser</span>
             </div>
 
