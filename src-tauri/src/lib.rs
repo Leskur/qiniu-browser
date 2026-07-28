@@ -145,7 +145,24 @@ use tauri::{Emitter, AppHandle};
 use log::{info, error};
 
 
-fn collect_files(paths: Vec<String>, prefix: &str) -> Vec<(PathBuf, String)> {
+fn collect_files(
+    paths: Vec<String>,
+    prefix: &str,
+    relative_paths: Option<Vec<String>>,
+) -> Vec<(PathBuf, String)> {
+    // 文件夹弹窗已扫出相对路径时，直接用它拼 key，保留目录结构
+    if let Some(rels) = relative_paths {
+        return paths
+            .into_iter()
+            .zip(rels)
+            .map(|(path_str, rel)| {
+                let rel = rel.replace('\\', "/");
+                let key = format!("{}{}", prefix, rel);
+                (PathBuf::from(path_str), key)
+            })
+            .collect();
+    }
+
     let mut result = Vec::new();
     for path_str in paths {
         let path = PathBuf::from(&path_str);
@@ -215,6 +232,7 @@ async fn upload_files(
     bucket: String,
     file_paths: Vec<String>,
     prefix: String,
+    relative_paths: Option<Vec<String>>,
 ) -> Result<UploadResult, String> {
     info!("上传开始: bucket={}, prefix={}, files={}", bucket, prefix, file_paths.len());
     let app_clone = app.clone();
@@ -227,7 +245,7 @@ async fn upload_files(
             )
         ).build();
 
-        let files = collect_files(file_paths, &prefix);
+        let files = collect_files(file_paths, &prefix, relative_paths);
         let uploaded: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let failed: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -256,15 +274,29 @@ async fn upload_files(
                 .object_name(key.clone())
                 .build();
 
-            // Register progress callback
+            // Register progress callback（节流：≥200ms 或进度变化 ≥1%）
             let app_progress = app_clone.clone();
             let task_id_progress = task_id.clone();
             let file_name_progress = file_name.clone();
             let file_path_progress = file_path.clone();
+            let last_emit = std::sync::Mutex::new((std::time::Instant::now() - std::time::Duration::from_secs(1), -1.0f64));
             auto_uploader.on_upload_progress(move |info| {
                 let uploaded = info.transferred_bytes();
                 let total = info.total_bytes().unwrap_or(total_size);
                 let progress = if total > 0 { uploaded as f64 / total as f64 * 100.0 } else { 0.0 };
+                {
+                    let mut guard = last_emit.lock().unwrap();
+                    let (ref mut last_at, ref mut last_pct) = *guard;
+                    let now = std::time::Instant::now();
+                    let due = now.duration_since(*last_at) >= std::time::Duration::from_millis(200)
+                        || (progress - *last_pct).abs() >= 1.0
+                        || progress >= 100.0;
+                    if !due {
+                        return Ok(());
+                    }
+                    *last_at = now;
+                    *last_pct = progress;
+                }
                 let _ = app_progress.emit("upload-progress", UploadProgressEvent {
                     task_id: task_id_progress.clone(),
                     file_name: file_name_progress.clone(),

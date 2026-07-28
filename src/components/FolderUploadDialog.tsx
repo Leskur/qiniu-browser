@@ -1,9 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, startTransition } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
 import { X, Folder, File, CheckSquare, Square, Loader2 } from "lucide-react";
 import { formatBytes } from "../lib/utils";
-import { ScrollArea } from "./ui/scroll-area";
-import { Checkbox } from "./ui/checkbox";
 
 interface FileInfo {
   path: string;
@@ -20,23 +19,26 @@ interface ScanResult {
 
 interface FolderUploadDialogProps {
   folderPath: string;
-  onConfirm: (selectedFiles: string[]) => void;
+  onConfirm: (selectedFiles: { path: string; relativePath: string }[]) => void;
   onCancel: () => void;
 }
+
+const ROW_HEIGHT = 52;
 
 export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUploadDialogProps) {
   const [loading, setLoading] = useState(true);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
-  
+  const scrollRef = useRef<HTMLDivElement>(null);
+
   const folderName = folderPath.split(/[/\\]/).pop() || folderPath;
-  
+  const files = scanResult?.files ?? [];
+
   useEffect(() => {
     invoke<ScanResult>("scan_folder", { folderPath })
       .then((result) => {
         setScanResult(result);
-        // Select all files by default
         setSelectedFiles(new Set(result.files.map(f => f.path)));
         setLoading(false);
       })
@@ -45,36 +47,48 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
         setLoading(false);
       });
   }, [folderPath]);
-  
-  const toggleFile = (path: string) => {
-    setSelectedFiles(prev => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
+
+  const rowVirtualizer = useVirtualizer({
+    count: files.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 12,
+  });
+
+  const toggleFile = useCallback((path: string) => {
+    startTransition(() => {
+      setSelectedFiles(prev => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return next;
+      });
     });
-  };
-  
-  const toggleAll = () => {
+  }, []);
+
+  const toggleAll = useCallback(() => {
     if (!scanResult) return;
-    if (selectedFiles.size === scanResult.files.length) {
-      setSelectedFiles(new Set());
-    } else {
-      setSelectedFiles(new Set(scanResult.files.map(f => f.path)));
+    startTransition(() => {
+      if (selectedFiles.size === scanResult.files.length) {
+        setSelectedFiles(new Set());
+      } else {
+        setSelectedFiles(new Set(scanResult.files.map(f => f.path)));
+      }
+    });
+  }, [scanResult, selectedFiles.size]);
+
+  const allSelected = !!scanResult && selectedFiles.size === scanResult.files.length && scanResult.files.length > 0;
+
+  const selectedSize = useMemo(() => {
+    if (!scanResult || selectedFiles.size === 0) return 0;
+    if (selectedFiles.size === scanResult.files.length) return scanResult.total_size;
+    let sum = 0;
+    for (const f of scanResult.files) {
+      if (selectedFiles.has(f.path)) sum += f.size;
     }
-  };
-  
-  const selectedSize = scanResult
-    ? scanResult.files
-        .filter(f => selectedFiles.has(f.path))
-        .reduce((sum, f) => sum + f.size, 0)
-    : 0;
-  
-  const allSelected = scanResult && selectedFiles.size === scanResult.files.length;
-  
+    return sum;
+  }, [scanResult, selectedFiles]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="w-full max-w-2xl mx-4 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
@@ -100,7 +114,7 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
             <X className="w-5 h-5 text-zinc-500" />
           </button>
         </div>
-        
+
         {/* Content */}
         <div className="p-6">
           {loading ? (
@@ -130,52 +144,59 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
                   onClick={toggleAll}
                   className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                 >
-                  {allSelected ? (
-                    <>
-                      <CheckSquare className="w-4 h-4" />
-                      全不选
-                    </>
-                  ) : (
-                    <>
-                      <Square className="w-4 h-4" />
-                      全选
-                    </>
-                  )}
+                  {allSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                  全选
                 </button>
               </div>
-              
-              {/* File List */}
-              <ScrollArea className="h-80 border border-zinc-200 dark:border-zinc-800 rounded-lg">
-                <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {scanResult.files.map((file) => (
-                    <label
-                      key={file.path}
-                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer transition-colors"
-                    >
-                      <Checkbox
-                        checked={selectedFiles.has(file.path)}
-                        onCheckedChange={() => toggleFile(file.path)}
-                      />
-                      <File className="w-4 h-4 text-zinc-400 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
-                          {file.name}
-                        </p>
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                          {file.relative_path}
-                        </p>
-                      </div>
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums shrink-0">
-                        {formatBytes(file.size)}
-                      </span>
-                    </label>
-                  ))}
+
+              {/* Virtualized File List */}
+              <div
+                ref={scrollRef}
+                className="h-80 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-y-auto"
+              >
+                <div
+                  className="relative w-full"
+                  style={{ height: rowVirtualizer.getTotalSize() }}
+                >
+                  {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                    const file = files[virtualRow.index];
+                    const checked = selectedFiles.has(file.path);
+                    return (
+                      <label
+                        key={file.path}
+                        className="absolute left-0 w-full flex items-center gap-3 px-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer border-b border-zinc-100 dark:border-zinc-800"
+                        style={{
+                          height: virtualRow.size,
+                          transform: `translateY(${virtualRow.start}px)`,
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleFile(file.path)}
+                          className="size-4 shrink-0 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500/30"
+                        />
+                        <File className="w-4 h-4 text-zinc-400 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                            {file.name}
+                          </p>
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                            {file.relative_path}
+                          </p>
+                        </div>
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums shrink-0">
+                          {formatBytes(file.size)}
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
-              </ScrollArea>
+              </div>
             </>
           ) : null}
         </div>
-        
+
         {/* Footer */}
         {scanResult && !loading && !error && (
           <div className="flex items-center justify-between px-6 py-4 bg-zinc-50 dark:bg-zinc-800/50 border-t border-zinc-200 dark:border-zinc-800">
@@ -195,7 +216,12 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
                 取消
               </button>
               <button
-                onClick={() => onConfirm(Array.from(selectedFiles))}
+                onClick={() => {
+                  const selected = files
+                    .filter((f) => selectedFiles.has(f.path))
+                    .map((f) => ({ path: f.path, relativePath: f.relative_path }));
+                  onConfirm(selected);
+                }}
                 disabled={selectedFiles.size === 0}
                 className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:pointer-events-none rounded-lg transition-colors"
               >

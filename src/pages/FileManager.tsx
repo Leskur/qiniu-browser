@@ -13,7 +13,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { FolderUploadDialog } from "../components/FolderUploadDialog";
-import { useTransferStore } from "../store/transfer";
+import { useTransferStore, type TransferTask } from "../store/transfer";
 import { useAppStore } from "../store";
 import { formatBytes, formatQiniuTime } from "../lib/utils";
 
@@ -39,6 +39,14 @@ function HighlightText({ text, query }: { text: string; query: string }) {
   );
 }
 
+/** 过滤空目录占位符（key 以 / 结尾），目录只取 commonPrefixes */
+function normalizeListResult(res: { items?: QiniuFile[]; commonPrefixes?: string[]; marker?: string }) {
+  const items = (res.items || []).filter(i => !i.key.endsWith('/'));
+  const folders = res.commonPrefixes || [];
+  const nextMarker = res.marker || "";
+  return { items, folders, nextMarker, hasMore: !!nextMarker };
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 type VirtualEntry =
@@ -53,7 +61,8 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   
   // Transfer store
-  const { addTask, updateTask, setPanelOpen } = useTransferStore();
+  const addTask = useTransferStore((s) => s.addTask);
+  const setPanelOpen = useTransferStore((s) => s.setPanelOpen);
 
   // Bucket stats from global store
   const { buckets } = useAppStore();
@@ -180,21 +189,14 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   const closeCtxMenu = () => setCtxMenu(null);
 
   // ── Search state ──
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [committedSearch, setCommittedSearch] = useState(""); // 回车后才生效的前缀
   const [searchActive, setSearchActive] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (previewFile) { closePreview(); return; }
-      if (ctxMenu) { closeCtxMenu(); return; }
-      if (selectedFile) { setSelectedFile(null); return; }
-      if (searchActive) { setSearchQuery(""); setSearchActive(false); return; }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [ctxMenu, selectedFile, searchActive, previewFile]);
+  const inApiSearchRef = useRef(false);
+  const searchRequestId = useRef(0);
+  const currentPrefixRef = useRef(currentPrefix);
+  currentPrefixRef.current = currentPrefix;
 
   // ── Delete state ──
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
@@ -213,7 +215,40 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   // ── Listen to upload/download progress events ──
   useEffect(() => {
     const taskMap = new Map<string, string>(); // backend task_id -> frontend task id
-    
+    const pendingPatches = new Map<string, Partial<TransferTask>>();
+    let rafId = 0;
+
+    const flushPatches = () => {
+      rafId = 0;
+      if (pendingPatches.size === 0) return;
+      const batch = new Map(pendingPatches);
+      pendingPatches.clear();
+      useTransferStore.getState().batchUpdateTasks(batch);
+    };
+
+    const schedulePatch = (frontendId: string, patch: Partial<TransferTask>, immediate: boolean) => {
+      const prev = pendingPatches.get(frontendId);
+      pendingPatches.set(frontendId, prev ? { ...prev, ...patch } : patch);
+      if (immediate) {
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+        flushPatches();
+        return;
+      }
+      if (!rafId) rafId = requestAnimationFrame(flushPatches);
+    };
+
+    const ensureTask = (task_id: string, type: 'upload' | 'download', fileName: string, totalSize: number) => {
+      let frontendId = taskMap.get(task_id);
+      if (!frontendId) {
+        frontendId = addTask({ type, fileName, totalSize });
+        taskMap.set(task_id, frontendId);
+      }
+      return frontendId;
+    };
+
     const unlistenUpload = listen<{
       task_id: string;
       file_name: string;
@@ -225,32 +260,18 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
       error?: string;
     }>('upload-progress', (event) => {
       const { task_id, file_name, total_size, uploaded_size, progress, status, error } = event.payload;
-      console.log('[upload-progress]', { task_id, file_name, status, progress, uploaded_size, total_size });
-      
-      if (!taskMap.has(task_id)) {
-        // New upload task
-        const frontendId = addTask({
-          type: 'upload',
-          fileName: file_name,
-          totalSize: total_size,
-        });
-        console.log('[upload-progress] created task', { backendId: task_id, frontendId });
-        taskMap.set(task_id, frontendId);
-      }
-      
-      const frontendId = taskMap.get(task_id);
-      if (frontendId) {
-        console.log('[upload-progress] updating task', { frontendId, status, progress });
-        updateTask(frontendId, {
-          transferredSize: uploaded_size,
-          progress,
-          status: status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : 'transferring',
-          error,
-          endTime: status === 'completed' || status === 'failed' ? Date.now() : undefined,
-        });
-      }
+      const frontendId = ensureTask(task_id, 'upload', file_name, total_size);
+      const terminal = status === 'completed' || status === 'failed';
+      schedulePatch(frontendId, {
+        transferredSize: uploaded_size,
+        progress,
+        status: status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : 'transferring',
+        error,
+        ...(terminal ? { endTime: Date.now() } : {}),
+        ...(total_size > 0 ? { totalSize: total_size } : {}),
+      }, terminal);
     });
-    
+
     const unlistenDownload = listen<{
       task_id: string;
       file_name: string;
@@ -262,37 +283,24 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
       error?: string;
     }>('download-progress', (event) => {
       const { task_id, file_name, total_size, downloaded_size, progress, status, error } = event.payload;
-      console.log('[download-progress]', { task_id, file_name, status, progress, downloaded_size, total_size });
-      
-      if (!taskMap.has(task_id)) {
-        // New download task
-        const frontendId = addTask({
-          type: 'download',
-          fileName: file_name,
-          totalSize: total_size,
-        });
-        console.log('[download-progress] created task', { backendId: task_id, frontendId });
-        taskMap.set(task_id, frontendId);
-      }
-      
-      const frontendId = taskMap.get(task_id);
-      if (frontendId) {
-        console.log('[download-progress] updating task', { frontendId, status, progress });
-        updateTask(frontendId, {
-          transferredSize: downloaded_size,
-          progress,
-          status: status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : 'transferring',
-          error,
-          endTime: status === 'completed' || status === 'failed' ? Date.now() : undefined,
-        });
-      }
+      const frontendId = ensureTask(task_id, 'download', file_name, total_size);
+      const terminal = status === 'completed' || status === 'failed';
+      schedulePatch(frontendId, {
+        transferredSize: downloaded_size,
+        progress,
+        status: status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : 'transferring',
+        error,
+        ...(terminal ? { endTime: Date.now() } : {}),
+        ...(total_size > 0 ? { totalSize: total_size } : {}),
+      }, terminal);
     });
-    
+
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       unlistenUpload.then(f => f());
       unlistenDownload.then(f => f());
     };
-  }, [addTask, updateTask]);
+  }, [addTask]);
 
   // ── Batch selection ──
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -410,13 +418,18 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     };
   }, [ak, sk, bucket, currentPrefix]);
 
-  const handleUploadPaths = async (paths: string[]) => {
+  const handleUploadPaths = async (paths: string[], relativePaths?: string[]) => {
     if (paths.length === 0) return;
     setIsUploading(true);
     setPanelOpen(true); // Open transfer panel
     
     try {
-      const result: { uploaded: string[]; failed: string[] } = await invoke('upload_files', { ak, sk, bucket, filePaths: paths, prefix: currentPrefix });
+      const result: { uploaded: string[]; failed: string[] } = await invoke('upload_files', {
+        ak, sk, bucket,
+        filePaths: paths,
+        prefix: currentPrefix,
+        relativePaths: relativePaths ?? null,
+      });
       
       // Only show toast for failures, progress panel shows success
       if (result.failed.length > 0) {
@@ -503,11 +516,8 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     setSelectedKeys(new Set());
     try {
       const res = await fetchFiles(ak, sk, bucket, prefix, "", itemsPerPage, "/");
-      // 过滤掉文件夹占位符（key 以 / 结尾的空文件）
-      const newItems = (res.items || []).filter(item => !item.key.endsWith('/'));
-      const newFolders = res.commonPrefixes || [];
-      const newMarker = res.marker || "";
-      const newHasMore = !!res.marker;
+      const { items: newItems, folders: newFolders, nextMarker: newMarker, hasMore: newHasMore } =
+        normalizeListResult(res);
 
       setItems(newItems);
       setFolders(newFolders);
@@ -525,46 +535,113 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     } finally {
       setLoading(false);
     }
-  }, [ak, sk, bucket, CACHE_TTL]);
+  }, [ak, sk, bucket, CACHE_TTL, itemsPerPage]);
+
+  const clearSearch = useCallback(() => {
+    setSearchInput("");
+    setCommittedSearch("");
+    setSearchActive(false);
+    if (inApiSearchRef.current) {
+      inApiSearchRef.current = false;
+      loadDirectory(currentPrefix);
+    }
+  }, [loadDirectory, currentPrefix]);
+
+  const runPrefixSearch = useCallback(async (rawQuery: string) => {
+    const q = rawQuery.trim();
+    if (!q) {
+      setCommittedSearch("");
+      if (inApiSearchRef.current) {
+        inApiSearchRef.current = false;
+        await loadDirectory(currentPrefixRef.current);
+      }
+      return;
+    }
+
+    const reqId = ++searchRequestId.current;
+    inApiSearchRef.current = true;
+    setCommittedSearch(q);
+    setLoading(true);
+    setError("");
+    setSelectedKeys(new Set());
+    try {
+      const res = await fetchFiles(ak, sk, bucket, currentPrefixRef.current + q, "", itemsPerPage, "/");
+      if (reqId !== searchRequestId.current) return;
+      const normalized = normalizeListResult(res);
+      setItems(normalized.items);
+      setFolders(normalized.folders);
+      setNextMarker(normalized.nextMarker);
+      setHasMore(normalized.hasMore);
+    } catch (err: any) {
+      if (reqId !== searchRequestId.current) return;
+      setError(err.message || "搜索失败");
+    } finally {
+      if (reqId === searchRequestId.current) setLoading(false);
+    }
+  }, [ak, sk, bucket, itemsPerPage, loadDirectory]);
+
+  /** 刷新当前视图：搜索中则重跑前缀搜索，否则刷新目录 */
+  const refreshCurrentView = useCallback(async (forceRefresh = true) => {
+    const q = committedSearch.trim();
+    if (!q) {
+      await loadDirectory(currentPrefix, forceRefresh);
+      return;
+    }
+    await runPrefixSearch(q);
+  }, [committedSearch, loadDirectory, currentPrefix, runPrefixSearch]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (previewFile) { closePreview(); return; }
+      if (ctxMenu) { closeCtxMenu(); return; }
+      if (selectedFile) { setSelectedFile(null); return; }
+      if (searchActive) { clearSearch(); return; }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [ctxMenu, selectedFile, searchActive, previewFile, clearSearch]);
 
   // ─── Load more (next page) ────────────────────────────────────────────────
   const loadMore = useCallback(async () => {
     if (!hasMore || loadingMore || !nextMarker) return;
     setLoadingMore(true);
+    const listPrefix = committedSearch ? currentPrefix + committedSearch : currentPrefix;
+    const isSearch = !!committedSearch;
     try {
-      const res = await fetchFiles(ak, sk, bucket, currentPrefix, nextMarker, itemsPerPage, "/");
-      // 过滤掉文件夹占位符（key 以 / 结尾的空文件）
-      const moreItems = (res.items || []).filter(item => !item.key.endsWith('/'));
-      const moreFolders = res.commonPrefixes || [];
-      const newMarker = res.marker || "";
-      const newHasMore = !!res.marker;
+      const res = await fetchFiles(ak, sk, bucket, listPrefix, nextMarker, itemsPerPage, "/");
+      const { items: moreItems, folders: moreFolders, nextMarker: newMarker, hasMore: newHasMore } =
+        normalizeListResult(res);
 
       setItems(prev => [...prev, ...moreItems]);
       setFolders(prev => {
-        // merge without duplicates
         const existing = new Set(prev);
         return [...prev, ...moreFolders.filter(f => !existing.has(f))];
       });
       setNextMarker(newMarker);
       setHasMore(newHasMore);
-      // Update cache with timestamp
-      dirCache.current.set(currentPrefix, {
-        items: [...items, ...moreItems],
-        folders: [...new Set([...folders, ...moreFolders])],
-        nextMarker: newMarker,
-        hasMore: newHasMore,
-        timestamp: Date.now()
-      });
+      if (!isSearch) {
+        dirCache.current.set(currentPrefix, {
+          items: [...items, ...moreItems],
+          folders: [...new Set([...folders, ...moreFolders])],
+          nextMarker: newMarker,
+          hasMore: newHasMore,
+          timestamp: Date.now()
+        });
+      }
     } catch (err: any) {
       toast.error("加载更多失败", { description: err.message });
     } finally {
       setLoadingMore(false);
     }
-  }, [ak, sk, bucket, currentPrefix, nextMarker, hasMore, loadingMore, items, folders]);
+  }, [ak, sk, bucket, currentPrefix, nextMarker, hasMore, loadingMore, items, folders, itemsPerPage, committedSearch]);
 
   useEffect(() => {
+    inApiSearchRef.current = false;
+    searchRequestId.current += 1; // cancel in-flight search
     loadDirectory(currentPrefix);
-    setSearchQuery("");   // clear search when navigating
+    setSearchInput("");
+    setCommittedSearch("");
     setSearchActive(false);
   }, [currentPrefix, loadDirectory]);
 
@@ -590,27 +667,18 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   const allSelected = allFileKeys.length > 0 && allFileKeys.every(k => selectedKeys.has(k));
 
   const sortedEntries = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    const folders = entries.filter(e => e.type === 'folder');
+    const folderEntries = entries.filter(e => e.type === 'folder');
     const files = entries.filter(e => e.type === 'file') as { type: 'file'; name: string; file: QiniuFile }[];
-    
-    // Apply search filter
-    const filteredFolders = q
-      ? folders.filter(e => e.name.toLowerCase().includes(q))
-      : folders;
-    const filteredFiles = q
-      ? files.filter(e => e.name.toLowerCase().includes(q))
-      : files;
-    
-    const sorted = [...filteredFiles].sort((a, b) => {
+
+    const sorted = [...files].sort((a, b) => {
       let cmp = 0;
       if (sortField === 'name') cmp = a.name.localeCompare(b.name);
       else if (sortField === 'size') cmp = a.file.fsize - b.file.fsize;
       else if (sortField === 'time') cmp = a.file.putTime - b.file.putTime;
       return sortDir === 'asc' ? cmp : -cmp;
     });
-    return [...filteredFolders, ...sorted];
-  }, [entries, sortField, sortDir, searchQuery]);
+    return [...folderEntries, ...sorted];
+  }, [entries, sortField, sortDir]);
 
   // ── Auto load more on scroll to bottom ──
   useEffect(() => {
@@ -629,7 +697,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   // ── F5 刷新触发 ──
   useEffect(() => {
     if (refreshTrigger !== undefined && refreshTrigger > 0) {
-      loadDirectory(currentPrefix, true);
+      refreshCurrentView(true);
       toast.success('已刷新文件列表');
     }
   }, [refreshTrigger]);
@@ -875,10 +943,13 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     }
   };
   
-  const handleFolderUploadConfirm = (selectedFiles: string[]) => {
+  const handleFolderUploadConfirm = (selectedFiles: { path: string; relativePath: string }[]) => {
     setFolderUploadPath(null);
     if (selectedFiles.length > 0) {
-      handleUploadPaths(selectedFiles);
+      handleUploadPaths(
+        selectedFiles.map((f) => f.path),
+        selectedFiles.map((f) => f.relativePath),
+      );
     }
   };
 
@@ -1052,7 +1123,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                 return;
               }
               setLastRefreshTime(now);
-              loadDirectory(currentPrefix, true);
+              refreshCurrentView(true);
             }}
             disabled={loading}
             title="刷新"
@@ -1066,7 +1137,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
               setTimeout(() => searchInputRef.current?.focus(), 50);
             }}
             title="搜索 (Ctrl+F)"
-            className={`p-2 rounded-lg transition-colors ${searchActive || searchQuery ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'}`}
+            className={`p-2 rounded-lg transition-colors ${searchActive || committedSearch ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'}`}
           >
             <Search className="w-4 h-4" />
           </button>
@@ -1147,21 +1218,22 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
           <input
             ref={searchInputRef}
             type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="搜索当前目录文件名..."
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            placeholder="按前缀搜索，回车确认..."
             className="flex-1 bg-transparent text-sm text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 outline-none"
             onKeyDown={e => {
-              if (e.key === 'Escape') { setSearchQuery(""); setSearchActive(false); }
+              if (e.key === 'Escape') { clearSearch(); }
+              if (e.key === 'Enter') { e.preventDefault(); runPrefixSearch(searchInput); }
             }}
           />
-          {searchQuery && (
+          {committedSearch && (
             <span className="text-xs text-zinc-400 tabular-nums shrink-0">
               {sortedEntries.length} 个结果
             </span>
           )}
           <button
-            onClick={() => { setSearchQuery(""); setSearchActive(false); }}
+            onClick={() => clearSearch()}
             className="p-1 rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shrink-0"
           >
             <X className="w-3.5 h-3.5" />
@@ -1191,7 +1263,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
             <p className="text-red-500 font-medium">加载失败</p>
             <p className="text-sm text-zinc-400 mt-1">{error}</p>
             <button
-              onClick={() => loadDirectory(currentPrefix, true)}
+              onClick={() => refreshCurrentView(true)}
               className="mt-4 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
             >重试</button>
           </div>
@@ -1199,9 +1271,13 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
           <div className="flex flex-col items-center justify-center h-full p-20 text-center text-zinc-400">
             <Folder className="w-16 h-16 mb-4 opacity-20" />
             <p className="text-lg font-medium text-zinc-500">
-              {currentPrefix ? "该文件夹是空的" : "空间中没有文件"}
+              {committedSearch
+                ? "没有匹配的前缀结果"
+                : currentPrefix ? "该文件夹是空的" : "空间中没有文件"}
             </p>
-            <p className="text-sm mt-1">上传一些文件来开始吧</p>
+            <p className="text-sm mt-1">
+              {committedSearch ? "试试更短的前缀，或检查拼写" : "上传一些文件来开始吧"}
+            </p>
           </div>
         ) : (
           <div ref={scrollContainerRef} className="h-full overflow-y-auto">
@@ -1262,7 +1338,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                       <div className="flex-1 pl-1 flex items-center gap-3 min-w-0">
                         <Folder className="w-4 h-4 text-amber-400 shrink-0" />
                         <span className="font-medium text-zinc-700 dark:text-zinc-200 truncate w-full min-w-0">
-                          <HighlightText text={entry.name} query={searchQuery} />
+                          <HighlightText text={entry.name} query={committedSearch} />
                         </span>
                       </div>
                       <div className="w-28 shrink-0 text-zinc-400">—</div>
@@ -1320,7 +1396,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                         />
                       ) : (
                         <span className="truncate w-full min-w-0 text-zinc-700 dark:text-zinc-200" title={file.key}>
-                          <HighlightText text={entry.name} query={searchQuery} />
+                          <HighlightText text={entry.name} query={committedSearch} />
                         </span>
                       )}
                     </div>
