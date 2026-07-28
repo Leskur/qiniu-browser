@@ -58,10 +58,21 @@ tauriConf.version = newVersion;
 fs.writeFileSync(tauriConfPath, JSON.stringify(tauriConf, null, 2) + '\n');
 console.log('✅ tauri.conf.json 已更新');
 
+// 3.5 更新 package-lock.json 根版本
+console.log('📝 更新 package-lock.json...');
+const packageLockPath = path.join(__dirname, '../package-lock.json');
+const packageLock = JSON.parse(fs.readFileSync(packageLockPath, 'utf8'));
+packageLock.version = newVersion;
+if (packageLock.packages && packageLock.packages['']) {
+  packageLock.packages[''].version = newVersion;
+}
+fs.writeFileSync(packageLockPath, JSON.stringify(packageLock, null, 2) + '\n');
+console.log('✅ package-lock.json 已更新');
+
 // 4. Git 操作
 console.log('\n📦 提交更改...');
 try {
-  execSync('git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json', { stdio: 'inherit' });
+  execSync('git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json', { stdio: 'inherit' });
   execSync(`git commit -m "chore: bump version to ${newVersion}"`, { stdio: 'inherit' });
   console.log('✅ 更改已提交');
 

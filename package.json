@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "tauri": "tauri",
-    "release": "node scripts/release.js"
+    "release": "node scripts/release.cjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",
