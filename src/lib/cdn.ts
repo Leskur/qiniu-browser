@@ -195,52 +195,83 @@ export async function cdnGetLogs(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface RefreshTask {
-  id: string;
+  id?: string;
+  taskId?: string;
+  requestId?: string;
   url: string;
   state: string;  // processing | success | failure
+  isDir?: string;
+  progress?: number;
   createAt: string;
-  finishAt?: string;
+  beginAt?: string;
+  endAt?: string;
+  finishAt?: string; // 兼容旧字段
 }
 
 export interface RefreshTaskListResult {
   code: number;
   error: string;
   items: RefreshTask[];
-  marker: string;
+  marker?: string;
+  total?: number;
+  pageNo?: number;
+  pageSize?: number;
+  currentSize?: number;
 }
 
 export interface PrefetchTask {
-  id: string;
+  id?: string;
+  taskId?: string;
+  requestId?: string;
   url: string;
   state: string;  // processing | success | failure
+  progress?: number;
   createAt: string;
-  finishAt?: string;
+  beginAt?: string;
+  endAt?: string;
+  finishAt?: string; // 兼容旧字段
 }
 
 export interface PrefetchTaskListResult {
   code: number;
   error: string;
   items: PrefetchTask[];
-  marker: string;
+  marker?: string;
+  total?: number;
+  pageNo?: number;
+  pageSize?: number;
+  currentSize?: number;
+}
+
+export interface CdnTaskQueryOptions {
+  requestId?: string;
+  urls?: string[];
+  isDir?: "yes" | "no";
+  state?: "processing" | "success" | "failure";
+  pageNo?: number;
+  pageSize?: number;
 }
 
 /** 查询刷新任务状态 */
 export async function cdnQueryRefreshTasks(
   ak: string,
   sk: string,
-  requestId?: string,
-  urls?: string[],
-  isDir?: "yes" | "no",
-  state?: "processing" | "success" | "failure",
-  pageNo: number = 1,
-  pageSize: number = 100
+  options: CdnTaskQueryOptions = {}
 ): Promise<RefreshTaskListResult> {
-  const body: any = { pageNo, pageSize };
+  const {
+    requestId,
+    urls,
+    isDir,
+    state,
+    pageNo = 0,
+    pageSize = 50,
+  } = options;
+  const body: Record<string, unknown> = { pageNo, pageSize };
   if (requestId) body.requestId = requestId;
   if (urls && urls.length > 0) body.urls = urls;
   if (isDir) body.isDir = isDir;
   if (state) body.state = state;
-  
+
   return fusionPost(ak, sk, "/v2/tune/refresh/list", body);
 }
 
@@ -248,16 +279,19 @@ export async function cdnQueryRefreshTasks(
 export async function cdnQueryPrefetchTasks(
   ak: string,
   sk: string,
-  requestId?: string,
-  urls?: string[],
-  state?: "processing" | "success" | "failure",
-  pageNo: number = 1,
-  pageSize: number = 100
+  options: CdnTaskQueryOptions = {}
 ): Promise<PrefetchTaskListResult> {
-  const body: any = { pageNo, pageSize };
+  const {
+    requestId,
+    urls,
+    state,
+    pageNo = 0,
+    pageSize = 50,
+  } = options;
+  const body: Record<string, unknown> = { pageNo, pageSize };
   if (requestId) body.requestId = requestId;
   if (urls && urls.length > 0) body.urls = urls;
   if (state) body.state = state;
-  
+
   return fusionPost(ak, sk, "/v2/tune/prefetch/list", body);
 }

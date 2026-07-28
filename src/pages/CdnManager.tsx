@@ -9,6 +9,33 @@ import {
   PrefetchTask 
 } from "../lib/cdn";
 import { RefreshCw, History, Loader2 } from "lucide-react";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "../components/ui/pagination";
+
+const TASK_PAGE_SIZE = 50;
+
+/** 生成页码序列（0-based pageNo → 1-based 展示） */
+function getPageItems(pageNo: number, totalPages: number): Array<number | "ellipsis"> {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i);
+  }
+  const current = pageNo;
+  const items: Array<number | "ellipsis"> = [0];
+  const start = Math.max(1, current - 1);
+  const end = Math.min(totalPages - 2, current + 1);
+  if (start > 1) items.push("ellipsis");
+  for (let i = start; i <= end; i++) items.push(i);
+  if (end < totalPages - 2) items.push("ellipsis");
+  items.push(totalPages - 1);
+  return items;
+}
 
 export function CdnManager({ 
   ak, 
@@ -31,6 +58,9 @@ export function CdnManager({
   const [lastRequestId, setLastRequestId] = useState<string | null>(null);
   const [taskType, setTaskType] = useState<"refresh" | "prefetch">("refresh");
   const [urlError, setUrlError] = useState("");
+  const [pageNo, setPageNo] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [queryRequestId, setQueryRequestId] = useState<string | undefined>();
 
   // 处理预填域名
   useEffect(() => {
@@ -88,7 +118,7 @@ export function CdnManager({
               label: '查看任务',
               onClick: () => {
                 setSubTab("history");
-                loadTasks(res.requestId, "refresh");
+                loadTasks({ requestId: res.requestId, type: "refresh", page: 0 });
               }
             }
           });
@@ -107,7 +137,7 @@ export function CdnManager({
               label: '查看任务',
               onClick: () => {
                 setSubTab("history");
-                loadTasks(res.requestId, "prefetch");
+                loadTasks({ requestId: res.requestId, type: "prefetch", page: 0 });
               }
             }
           });
@@ -121,18 +151,28 @@ export function CdnManager({
     }
   };
 
-  const loadTasks = async (requestId?: string, type?: "refresh" | "prefetch") => {
-    const currentType = type || taskType;
+  const loadTasks = async (opts?: {
+    requestId?: string;
+    type?: "refresh" | "prefetch";
+    page?: number;
+  }) => {
+    const currentType = opts?.type || taskType;
+    const page = opts?.page ?? pageNo;
+    const requestId = opts?.requestId !== undefined ? opts.requestId : queryRequestId;
     setLoadingTasks(true);
     try {
-      if (currentType === "refresh") {
-        const res = await cdnQueryRefreshTasks(ak, sk, requestId);
-        setTasks(res.items || []);
-      } else {
-        const res = await cdnQueryPrefetchTasks(ak, sk, requestId);
-        setTasks(res.items || []);
-      }
+      const query = { requestId, pageNo: page, pageSize: TASK_PAGE_SIZE };
+      const res = currentType === "refresh"
+        ? await cdnQueryRefreshTasks(ak, sk, query)
+        : await cdnQueryPrefetchTasks(ak, sk, query);
+      console.log(`[CDN] ${currentType}/list`, { query, res });
+      setTasks(res.items || []);
+      setTotal(res.total ?? (res.items?.length || 0));
+      setPageNo(res.pageNo ?? page);
+      setQueryRequestId(requestId);
+      if (opts?.type) setTaskType(opts.type);
     } catch (err: any) {
+      console.error("[CDN] 加载任务失败", err);
       toast.error("加载任务失败", { description: err.message });
     } finally {
       setLoadingTasks(false);
@@ -141,17 +181,21 @@ export function CdnManager({
 
   useEffect(() => {
     if (subTab === "history") {
-      loadTasks(lastRequestId || undefined);
+      loadTasks({ requestId: lastRequestId || undefined, page: 0 });
     }
   }, [subTab]);
 
   // ── F5 刷新触发 ──
   useEffect(() => {
     if (refreshTrigger !== undefined && refreshTrigger > 0 && subTab === "history") {
-      loadTasks(lastRequestId || undefined);
+      loadTasks({ page: pageNo });
       toast.success('已刷新任务列表');
     }
   }, [refreshTrigger]);
+
+  const totalPages = Math.max(1, Math.ceil(total / TASK_PAGE_SIZE));
+  const canPrev = pageNo > 0;
+  const canNext = pageNo + 1 < totalPages;
 
   const getStateBadge = (state: string) => {
     switch (state) {
@@ -204,24 +248,27 @@ export function CdnManager({
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
                   {taskType === "refresh" ? "刷新" : "预取"}任务记录
+                  {total > 0 && (
+                    <span className="ml-2 text-xs font-normal text-zinc-400">共 {total} 条</span>
+                  )}
                 </h3>
                 <div className="flex items-center gap-2">
                   <div className="flex bg-zinc-100 dark:bg-zinc-800 p-0.5 rounded-lg">
                     <button
-                      onClick={() => { setTaskType("refresh"); loadTasks(undefined, "refresh"); }}
+                      onClick={() => loadTasks({ requestId: undefined, type: "refresh", page: 0 })}
                       className={`px-3 py-1 text-xs font-medium rounded transition-all cursor-pointer ${taskType === "refresh" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500"}`}
                     >
                       刷新
                     </button>
                     <button
-                      onClick={() => { setTaskType("prefetch"); loadTasks(undefined, "prefetch"); }}
+                      onClick={() => loadTasks({ requestId: undefined, type: "prefetch", page: 0 })}
                       className={`px-3 py-1 text-xs font-medium rounded transition-all cursor-pointer ${taskType === "prefetch" ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-600 dark:text-emerald-400" : "text-zinc-500"}`}
                     >
                       预取
                     </button>
                   </div>
                   <button
-                    onClick={() => loadTasks()}
+                    onClick={() => loadTasks({ page: pageNo })}
                     disabled={loadingTasks}
                     className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                   >
@@ -252,8 +299,11 @@ export function CdnManager({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                      {tasks.map((task) => (
-                        <tr key={task.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors">
+                      {tasks.map((task, index) => {
+                        const finishedAt = task.endAt || task.finishAt;
+                        const rowKey = task.taskId || task.id || `${task.url}-${task.createAt}-${index}`;
+                        return (
+                        <tr key={rowKey} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors">
                           <td className="px-4 py-3 w-24">
                             {getStateBadge(task.state)}
                           </td>
@@ -264,18 +314,75 @@ export function CdnManager({
                           </td>
                           <td className="px-4 py-3 w-40">
                             <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                              {new Date(task.createAt).toLocaleString()}
+                              {task.createAt || '-'}
                             </span>
                           </td>
                           <td className="px-4 py-3 w-40">
                             <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                              {task.finishAt ? new Date(task.finishAt).toLocaleString() : '-'}
+                              {finishedAt || '-'}
                             </span>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {total > 0 && (
+                <div className="flex items-center justify-between gap-4 pt-1">
+                  <span className="text-xs text-zinc-400 shrink-0">
+                    共 {total} 条 · 每页 {TASK_PAGE_SIZE} 条
+                  </span>
+                  <Pagination className="mx-0 w-auto justify-end">
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          text="上一页"
+                          aria-disabled={!canPrev || loadingTasks}
+                          className={!canPrev || loadingTasks ? "pointer-events-none opacity-40" : undefined}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (canPrev && !loadingTasks) loadTasks({ page: pageNo - 1 });
+                          }}
+                        />
+                      </PaginationItem>
+                      {getPageItems(pageNo, totalPages).map((item, idx) =>
+                        item === "ellipsis" ? (
+                          <PaginationItem key={`e-${idx}`}>
+                            <PaginationEllipsis />
+                          </PaginationItem>
+                        ) : (
+                          <PaginationItem key={item}>
+                            <PaginationLink
+                              href="#"
+                              isActive={item === pageNo}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                if (!loadingTasks && item !== pageNo) loadTasks({ page: item });
+                              }}
+                            >
+                              {item + 1}
+                            </PaginationLink>
+                          </PaginationItem>
+                        )
+                      )}
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          text="下一页"
+                          aria-disabled={!canNext || loadingTasks}
+                          className={!canNext || loadingTasks ? "pointer-events-none opacity-40" : undefined}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (canNext && !loadingTasks) loadTasks({ page: pageNo + 1 });
+                          }}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
                 </div>
               )}
             </div>
