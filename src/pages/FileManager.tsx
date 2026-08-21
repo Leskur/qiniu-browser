@@ -67,6 +67,8 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   // Bucket stats from global store
   const { buckets } = useAppStore();
   const bucketInfo = buckets.find(b => b.tbl === bucket);
+  // 桶信息未就绪时默认按私有签名，避免裸链 401
+  const isPrivateBucket = bucketInfo ? bucketInfo.private === 1 : true;
   
   // Folder upload dialog
   const [folderUploadPath, setFolderUploadPath] = useState<string | null>(null);
@@ -201,6 +203,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   // ── Delete state ──
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
   const [dirToDelete, setDirToDelete] = useState<string | null>(null);
+  const [batchDeletePending, setBatchDeletePending] = useState(false);
   const [isDeleting, setIsDeleting]     = useState(false);
 
   // ── Upload state ──
@@ -261,11 +264,22 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     }>('upload-progress', (event) => {
       const { task_id, file_name, total_size, uploaded_size, progress, status, error } = event.payload;
       const frontendId = ensureTask(task_id, 'upload', file_name, total_size);
-      const terminal = status === 'completed' || status === 'failed';
+      // 已取消：忽略迟到进度；若实际上传已完成则仍记成功
+      const existing = useTransferStore.getState().tasksById[frontendId];
+      if (existing?.status === 'cancelled' && status !== 'completed' && status !== 'cancelled') {
+        return;
+      }
+
+      const terminal = status === 'completed' || status === 'failed' || status === 'cancelled';
+      const mappedStatus =
+        status === 'completed' ? 'completed'
+        : status === 'failed' ? 'failed'
+        : status === 'cancelled' ? 'cancelled'
+        : 'transferring';
       schedulePatch(frontendId, {
         transferredSize: uploaded_size,
         progress,
-        status: status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : 'transferring',
+        status: mappedStatus,
         error,
         ...(terminal ? { endTime: Date.now() } : {}),
         ...(total_size > 0 ? { totalSize: total_size } : {}),
@@ -403,10 +417,42 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   useEffect(() => {
     const unlisten = listen<{ paths: string[]; position: { x: number; y: number } }>(
       'tauri://drag-drop',
-      (event) => {
+      async (event) => {
         setIsDragOver(false);
         const paths = event.payload.paths;
-        if (paths.length > 0) handleUploadPaths(paths);
+        if (paths.length === 0) return;
+
+        try {
+          const classified = await invoke<[string, boolean][]>('classify_paths', { paths });
+          const dirs = classified.filter(([, isDir]) => isDir).map(([p]) => p);
+          const files = classified.filter(([, isDir]) => !isDir).map(([p]) => p);
+
+          // 只拖一个文件夹 → 弹出确认窗（与「上传文件夹」一致）
+          if (dirs.length === 1 && files.length === 0) {
+            setFolderUploadPath(dirs[0]);
+            return;
+          }
+
+          // 多个文件夹：提示一次只处理一个
+          if (dirs.length > 1 && files.length === 0) {
+            toast.info('请一次拖入一个文件夹');
+            setFolderUploadPath(dirs[0]);
+            return;
+          }
+
+          // 文件 + 文件夹混拖：文件直接上传，单个文件夹走确认窗
+          if (files.length > 0) {
+            handleUploadPaths(files);
+          }
+          if (dirs.length === 1) {
+            setFolderUploadPath(dirs[0]);
+          } else if (dirs.length > 1) {
+            toast.info('检测到多个文件夹，请一次拖入一个以便确认内容');
+          }
+        } catch (err: any) {
+          // 分类失败则回退为直接上传
+          handleUploadPaths(paths);
+        }
       }
     );
     const unlistenHover = listen('tauri://drag-over', () => setIsDragOver(true));
@@ -445,14 +491,19 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
   // ── Download ──
   const handleDownload = async (key: string) => {
-    if (domains.length === 0) { toast.warning("此存储空间未绑定外链域名，无法下载"); return; }
+    if (domains.length === 0) {
+      toast.warning("此存储空间未绑定外链域名，无法下载", {
+        description: "请先在「CDN → 域名」绑定域名后再试",
+      });
+      return;
+    }
     const filename = key.split('/').pop() || key;
     const savePath = await save({
       title: "保存文件",
       defaultPath: filename,
     });
     if (!savePath) return;
-    const url = generateDownloadUrl(ak, sk, domains[0], key);
+    const url = generateDownloadUrl(ak, sk, domains[0], key, isPrivateBucket);
     const tid = toast.loading(`正在下载 ${filename}...`, { duration: Infinity });
     try {
       await invoke("download_file", { url, savePath });
@@ -744,30 +795,39 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   const handleBatchDelete = async () => {
     const keys = [...selectedKeys];
     if (keys.length === 0) return;
+    setIsDeleting(true);
     const tid = toast.loading(`正在删除 ${keys.length} 个文件...`, { duration: Infinity });
     try {
       await batchDeleteFiles(ak, sk, bucket, keys);
       toast.dismiss(tid);
       toast.success(`已删除 ${keys.length} 个文件`);
       setSelectedKeys(new Set());
+      setBatchDeletePending(false);
       loadDirectory(currentPrefix, true);
     } catch (err: any) {
       toast.dismiss(tid);
       toast.error('批量删除失败', { description: err.message });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
   const handleBatchDownload = async () => {
     const keys = [...selectedKeys];
     if (keys.length === 0) return;
-    if (domains.length === 0) { toast.warning('此存储空间未绑定外链域名，无法下载'); return; }
+    if (domains.length === 0) {
+      toast.warning('此存储空间未绑定外链域名，无法下载', {
+        description: '请先在「CDN → 域名」绑定域名后再试',
+      });
+      return;
+    }
     const dir = await open({ directory: true, title: '选择保存目录' });
     if (!dir || Array.isArray(dir)) return;
     
     setPanelOpen(true); // Open transfer panel
     
     const batchItems: [string, string][] = keys.map(key => [
-      generateDownloadUrl(ak, sk, domains[0], key),
+      generateDownloadUrl(ak, sk, domains[0], key, isPrivateBucket),
       key.split('/').pop() || key,
     ]);
     
@@ -785,7 +845,12 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   };
   
   const handleDownloadFolder = async (folderPrefix: string) => {
-    if (domains.length === 0) { toast.warning('此存储空间未绑定外链域名，无法下载'); return; }
+    if (domains.length === 0) {
+      toast.warning('此存储空间未绑定外链域名，无法下载', {
+        description: '请先在「CDN → 域名」绑定域名后再试',
+      });
+      return;
+    }
     
     const dir = await open({ directory: true, title: '选择保存目录' });
     if (!dir || Array.isArray(dir)) return;
@@ -838,7 +903,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
       const batchItems: [string, string][] = allFiles
         .filter(file => !file.key.endsWith('/'))
         .map(file => [
-          generateDownloadUrl(ak, sk, domains[0], file.key),
+          generateDownloadUrl(ak, sk, domains[0], file.key, isPrivateBucket),
           folderName + '/' + file.key.slice(folderPrefix.length), // Add folder name prefix
         ]);
       
@@ -883,13 +948,20 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   // ─── Copy link ───────────────────────────────────────────────────────────
   const handleCopyLink = (e: React.MouseEvent, key: string) => {
     e.stopPropagation();
-    if (domains.length === 0) { toast.warning("此存储空间未绑定外链域名"); return; }
-    let domain = domains[0];
-    if (!domain.startsWith("http")) domain = "http://" + domain;
-    const url = `${domain}/${encodeURI(key)}`;
+    if (domains.length === 0) {
+      toast.warning("此存储空间未绑定外链域名", {
+        description: "请先在「CDN → 域名」绑定域名后再试",
+      });
+      return;
+    }
+    // 私有空间复制签名临时链；公开空间复制裸链
+    const url = generateDownloadUrl(ak, sk, domains[0], key, isPrivateBucket, 3600);
     navigator.clipboard.writeText(url).then(() => {
       setCopiedKey(key);
-      toast.success("已复制到剪贴板");
+      toast.success(
+        isPrivateBucket ? "已复制临时访问链接" : "已复制到剪贴板",
+        isPrivateBucket ? { description: "链接约 1 小时内有效" } : undefined,
+      );
       setTimeout(() => setCopiedKey(null), 2000);
     }).catch(() => toast.error("复制失败"));
   };
@@ -1100,7 +1172,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
               <Download className="w-4 h-4" />批量下载
             </button>
             <button
-              onClick={handleBatchDelete}
+              onClick={() => setBatchDeletePending(true)}
               className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors"
             >
               <Trash2 className="w-4 h-4" />批量删除
@@ -1220,7 +1292,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
             type="text"
             value={searchInput}
             onChange={e => setSearchInput(e.target.value)}
-            placeholder="按前缀搜索，回车确认..."
+            placeholder="匹配 key 前缀（非文件名），回车搜索…"
             className="flex-1 bg-transparent text-sm text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 outline-none"
             onKeyDown={e => {
               if (e.key === 'Escape') { clearSearch(); }
@@ -1238,6 +1310,13 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
           >
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+      {searchActive && !committedSearch && (
+        <div className="px-4 py-1.5 border-b border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/20 shrink-0">
+          <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
+            仅匹配当前目录下以输入内容开头的路径，例如输入 <code className="font-mono text-zinc-500">images/</code>，不会搜到路径中间的文件名
+          </p>
         </div>
       )}
 
@@ -1275,8 +1354,10 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                 ? "没有匹配的前缀结果"
                 : currentPrefix ? "该文件夹是空的" : "空间中没有文件"}
             </p>
-            <p className="text-sm mt-1">
-              {committedSearch ? "试试更短的前缀，或检查拼写" : "上传一些文件来开始吧"}
+            <p className="text-sm mt-1 max-w-sm">
+              {committedSearch
+                ? "搜索只匹配路径前缀。若要找 images/logo.png，请输入 images/logo 或 images/"
+                : "上传一些文件来开始吧"}
             </p>
           </div>
         ) : (
@@ -1524,7 +1605,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                   onClick={() => openPreview(selectedFile)}
                 >
                   <img
-                    src={generateDownloadUrl(ak, sk, domains[0], selectedFile.key)}
+                    src={generateDownloadUrl(ak, sk, domains[0], selectedFile.key, isPrivateBucket)}
                     alt={selectedFile.key}
                     className="max-w-full max-h-56 object-contain"
                     onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
@@ -1619,7 +1700,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
           {/* Image */}
           <img
-            src={generateDownloadUrl(ak, sk, domains[0], previewFile.key)}
+            src={generateDownloadUrl(ak, sk, domains[0], previewFile.key, isPrivateBucket)}
             alt={previewFile.key}
             className="max-w-[90vw] max-h-[90vh] object-contain select-none"
             onClick={(e) => e.stopPropagation()}
@@ -1685,7 +1766,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
       )}
 
       {/* ── Delete Modal ── */}
-      {(fileToDelete || dirToDelete) && (
+      {(fileToDelete || dirToDelete || batchDeletePending) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-zinc-900 w-full max-w-sm rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-6 text-center mx-4">
             <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 dark:bg-red-900/30 mb-4">
@@ -1693,12 +1774,25 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
             </div>
             <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-2">确认删除？</h3>
             <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 break-all">
-              <strong className="text-red-500 block mb-1">{fileToDelete || dirToDelete}</strong>
-              {dirToDelete ? "该目录下的所有文件都将被彻底删除，并且无法恢复" : "删除后将无法恢复"}
+              {batchDeletePending ? (
+                <>
+                  <strong className="text-red-500 block mb-1">将删除已选的 {selectedKeys.size} 个文件</strong>
+                  删除后将无法恢复
+                </>
+              ) : (
+                <>
+                  <strong className="text-red-500 block mb-1">{fileToDelete || dirToDelete}</strong>
+                  {dirToDelete ? "该目录下的所有文件都将被彻底删除，并且无法恢复" : "删除后将无法恢复"}
+                </>
+              )}
             </p>
             <div className="flex flex-col gap-2">
               <button
-                onClick={() => dirToDelete ? executeDeleteDirectory(dirToDelete) : executeDeleteFile(fileToDelete!)}
+                onClick={() => {
+                  if (batchDeletePending) handleBatchDelete();
+                  else if (dirToDelete) executeDeleteDirectory(dirToDelete);
+                  else executeDeleteFile(fileToDelete!);
+                }}
                 disabled={isDeleting}
                 className="w-full px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
@@ -1707,7 +1801,13 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                   : "确认删除"}
               </button>
               <button
-                onClick={() => { if (!isDeleting) { setFileToDelete(null); setDirToDelete(null); } }}
+                onClick={() => {
+                  if (!isDeleting) {
+                    setFileToDelete(null);
+                    setDirToDelete(null);
+                    setBatchDeletePending(false);
+                  }
+                }}
                 disabled={isDeleting}
                 className="w-full px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl transition-colors"
               >

@@ -14,7 +14,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { useAppStore } from "./store";
 import {
   Database, Zap, LogOut, Settings, Bookmark,
-  X, Folder
+  X, Folder, ChevronsUpDown
 } from "lucide-react";
 import "./App.css";
 
@@ -270,7 +270,7 @@ function App() {
                     </p>
                   )}
                 </div>
-                <Settings className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0" />
+                <ChevronsUpDown className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0" />
               </button>
 
               {/* Account dropdown menu */}

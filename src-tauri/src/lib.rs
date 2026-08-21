@@ -1,10 +1,20 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// 全局上传取消标志：true 时跳过未开始文件，并中断进行中的上传
+static UPLOAD_CANCEL_FLAG: AtomicBool = AtomicBool::new(false);
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+#[tauri::command]
+fn cancel_uploads() {
+    UPLOAD_CANCEL_FLAG.store(true, Ordering::SeqCst);
+    info!("收到停止全部上传请求");
 }
 
 #[tauri::command]
@@ -235,6 +245,7 @@ async fn upload_files(
     relative_paths: Option<Vec<String>>,
 ) -> Result<UploadResult, String> {
     info!("上传开始: bucket={}, prefix={}, files={}", bucket, prefix, file_paths.len());
+    UPLOAD_CANCEL_FLAG.store(false, Ordering::SeqCst);
     let app_clone = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let upload_manager = UploadManager::builder(
@@ -248,8 +259,15 @@ async fn upload_files(
         let files = collect_files(file_paths, &prefix, relative_paths);
         let uploaded: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let failed: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let cancelled: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
         files.par_iter().for_each(|(path, key)| {
+            // 尚未开始的任务：直接跳过，不创建前端条目
+            if UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
+                cancelled.lock().unwrap().push(key.clone());
+                return;
+            }
+
             let task_id = uuid::Uuid::new_v4().to_string();
             let file_name = key.clone();
             let file_path = path.to_string_lossy().to_string();
@@ -269,18 +287,37 @@ async fn upload_files(
                 error: None,
             });
 
+            // 发出开始事件后再次检查，避免刚创建的任务继续跑
+            if UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
+                cancelled.lock().unwrap().push(key.clone());
+                let _ = app_clone.emit("upload-progress", UploadProgressEvent {
+                    task_id,
+                    file_name,
+                    file_path,
+                    total_size,
+                    uploaded_size: 0,
+                    progress: 0.0,
+                    status: "cancelled".to_string(),
+                    error: Some("已停止".to_string()),
+                });
+                return;
+            }
+
             let mut auto_uploader: AutoUploader<md5::Md5> = upload_manager.auto_uploader();
             let auto_params = AutoUploaderObjectParams::builder()
                 .object_name(key.clone())
                 .build();
 
-            // Register progress callback（节流：≥200ms 或进度变化 ≥1%）
+            // Register progress callback（节流：≥200ms 或进度变化 ≥1%；取消时返回 Err 中断）
             let app_progress = app_clone.clone();
             let task_id_progress = task_id.clone();
             let file_name_progress = file_name.clone();
             let file_path_progress = file_path.clone();
             let last_emit = std::sync::Mutex::new((std::time::Instant::now() - std::time::Duration::from_secs(1), -1.0f64));
             auto_uploader.on_upload_progress(move |info| {
+                if UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "upload cancelled").into());
+                }
                 let uploaded = info.transferred_bytes();
                 let total = info.total_bytes().unwrap_or(total_size);
                 let progress = if total > 0 { uploaded as f64 / total as f64 * 100.0 } else { 0.0 };
@@ -312,9 +349,9 @@ async fn upload_files(
             
             match auto_uploader.upload_path(path, auto_params) {
                 Ok(_) => {
+                    // 极端情况下完成瞬间才取消，仍记为成功
                     info!("上传成功: {}", key);
                     uploaded.lock().unwrap().push(key.clone());
-                    // Emit success event
                     let _ = app_clone.emit("upload-progress", UploadProgressEvent {
                         task_id,
                         file_name,
@@ -327,23 +364,42 @@ async fn upload_files(
                     });
                 },
                 Err(e) => {
-                    error!("上传失败: {} - {}", key, e);
-                    let error_msg = format!("{}: {}", key, e);
-                    failed.lock().unwrap().push(error_msg.clone());
-                    // Emit error event
-                    let _ = app_clone.emit("upload-progress", UploadProgressEvent {
-                        task_id,
-                        file_name,
-                        file_path,
-                        total_size,
-                        uploaded_size: 0,
-                        progress: 0.0,
-                        status: "failed".to_string(),
-                        error: Some(error_msg),
-                    });
+                    if UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
+                        info!("上传已取消: {}", key);
+                        cancelled.lock().unwrap().push(key.clone());
+                        let _ = app_clone.emit("upload-progress", UploadProgressEvent {
+                            task_id,
+                            file_name,
+                            file_path,
+                            total_size,
+                            uploaded_size: 0,
+                            progress: 0.0,
+                            status: "cancelled".to_string(),
+                            error: Some("已停止".to_string()),
+                        });
+                    } else {
+                        error!("上传失败: {} - {}", key, e);
+                        let error_msg = format!("{}: {}", key, e);
+                        failed.lock().unwrap().push(error_msg.clone());
+                        let _ = app_clone.emit("upload-progress", UploadProgressEvent {
+                            task_id,
+                            file_name,
+                            file_path,
+                            total_size,
+                            uploaded_size: 0,
+                            progress: 0.0,
+                            status: "failed".to_string(),
+                            error: Some(error_msg),
+                        });
+                    }
                 },
             }
         });
+
+        let cancelled_count = cancelled.into_inner().unwrap().len();
+        if cancelled_count > 0 {
+            info!("上传结束（含取消 {} 个）", cancelled_count);
+        }
 
         Ok(UploadResult {
             uploaded: uploaded.into_inner().unwrap(),
@@ -582,6 +638,22 @@ fn scan_folder(folder_path: String) -> Result<ScanFolderResult, String> {
     })
 }
 
+#[tauri::command]
+fn path_is_dir(path: String) -> bool {
+    PathBuf::from(path).is_dir()
+}
+
+#[tauri::command]
+fn classify_paths(paths: Vec<String>) -> Vec<(String, bool)> {
+    paths
+        .into_iter()
+        .map(|p| {
+            let is_dir = PathBuf::from(&p).is_dir();
+            (p, is_dir)
+        })
+        .collect()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -600,7 +672,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![greet, get_histories, get_kodo_histories, save_history, delete_history, upload_files, download_file, download_files_to_dir, scan_folder])
+        .invoke_handler(tauri::generate_handler![greet, get_histories, get_kodo_histories, save_history, delete_history, upload_files, cancel_uploads, download_file, download_files_to_dir, scan_folder, path_is_dir, classify_paths])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -3523,7 +3523,7 @@ dependencies = [
 
 [[package]]
 name = "qiniu-browser"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "log",
  "md-5 0.10.6",

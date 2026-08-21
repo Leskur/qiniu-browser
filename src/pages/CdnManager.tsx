@@ -8,7 +8,7 @@ import {
   RefreshTask,
   PrefetchTask 
 } from "../lib/cdn";
-import { RefreshCw, History, Loader2 } from "lucide-react";
+import { RefreshCw, History, Loader2, X } from "lucide-react";
 import {
   Pagination,
   PaginationContent,
@@ -158,14 +158,14 @@ export function CdnManager({
   }) => {
     const currentType = opts?.type || taskType;
     const page = opts?.page ?? pageNo;
-    const requestId = opts?.requestId !== undefined ? opts.requestId : queryRequestId;
+    // 用 in 判断，才能让 requestId: undefined 真正清除筛选
+    const requestId = opts && "requestId" in opts ? opts.requestId : queryRequestId;
     setLoadingTasks(true);
     try {
       const query = { requestId, pageNo: page, pageSize: TASK_PAGE_SIZE };
       const res = currentType === "refresh"
         ? await cdnQueryRefreshTasks(ak, sk, query)
         : await cdnQueryPrefetchTasks(ak, sk, query);
-      console.log(`[CDN] ${currentType}/list`, { query, res });
       setTasks(res.items || []);
       setTotal(res.total ?? (res.items?.length || 0));
       setPageNo(res.pageNo ?? page);
@@ -181,7 +181,10 @@ export function CdnManager({
 
   useEffect(() => {
     if (subTab === "history") {
-      loadTasks({ requestId: lastRequestId || undefined, page: 0 });
+      // lastRequestId 仅用于「查看任务」一次性筛选，进入后清空，避免下次进历史仍被锁住
+      const rid = lastRequestId || undefined;
+      loadTasks({ requestId: rid, page: 0 });
+      if (lastRequestId) setLastRequestId(null);
     }
   }, [subTab]);
 
@@ -278,6 +281,23 @@ export function CdnManager({
                 </div>
               </div>
 
+              {queryRequestId && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 text-xs text-amber-800 dark:text-amber-200">
+                  <span className="truncate flex-1">
+                    已按 RequestID 筛选：
+                    <code className="ml-1 font-mono">{queryRequestId}</code>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => loadTasks({ requestId: undefined, page: 0 })}
+                    className="inline-flex items-center gap-1 shrink-0 px-2 py-1 rounded-md bg-white/80 dark:bg-zinc-900/60 hover:bg-white dark:hover:bg-zinc-800 text-amber-700 dark:text-amber-300 transition-colors cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                    查看全部
+                  </button>
+                </div>
+              )}
+
               {loadingTasks ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
@@ -285,7 +305,18 @@ export function CdnManager({
               ) : tasks.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <History className="w-16 h-16 text-zinc-300 dark:text-zinc-700 mb-4" />
-                  <p className="text-zinc-500 dark:text-zinc-400">暂无任务记录</p>
+                  <p className="text-zinc-500 dark:text-zinc-400">
+                    {queryRequestId ? "该 RequestID 下暂无任务" : "暂无任务记录"}
+                  </p>
+                  {queryRequestId && (
+                    <button
+                      type="button"
+                      onClick={() => loadTasks({ requestId: undefined, page: 0 })}
+                      className="mt-3 text-sm text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                    >
+                      查看全部任务
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
@@ -401,6 +432,12 @@ export function CdnManager({
                 placeholder={`http://example.com/image.jpg\n${subTab === "refresh" ? "http://example.com/assets/" : ""}`}
                 className="w-full h-48 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 text-sm font-mono text-zinc-800 dark:text-zinc-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none resize-none"
               />
+
+              {subTab === "refresh" && (
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 leading-relaxed">
+                  目录请以 <code className="font-mono text-zinc-500">/</code> 结尾（如 <code className="font-mono text-zinc-500">https://example.com/assets/</code>），否则按单个文件 URL 刷新
+                </p>
+              )}
 
               {urlError && (
                 <p className="text-xs text-red-500 dark:text-red-400">{urlError}</p>
