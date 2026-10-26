@@ -3526,7 +3526,6 @@ name = "qiniu-browser"
 version = "0.0.4"
 dependencies = [
  "log",
- "md-5 0.10.6",
  "qiniu-sdk",
  "rayon",
  "reqwest 0.12.28",

@@ -303,10 +303,8 @@ async fn upload_files(
                 return;
             }
 
-            let mut auto_uploader: AutoUploader<md5::Md5> = upload_manager.auto_uploader();
-            let auto_params = AutoUploaderObjectParams::builder()
-                .object_name(key.clone())
-                .build();
+            // 默认 AutoUploader（SHA1），与七牛文档一致，断点记录才能对上
+            let mut auto_uploader: AutoUploader = upload_manager.auto_uploader();
 
             // Register progress callback（节流：≥200ms 或进度变化 ≥1%；取消时返回 Err 中断）
             let app_progress = app_clone.clone();
@@ -347,7 +345,23 @@ async fn upload_files(
                 Ok(())
             });
             
-            match auto_uploader.upload_path(path, auto_params) {
+            let upload_params = || {
+                AutoUploaderObjectParams::builder()
+                    .object_name(key.clone())
+                    .file_name(key.clone())
+                    .build()
+            };
+            // 大文件中断后，再执行一次同样的上传，SDK 会按断点记录接着传
+            let first = auto_uploader.upload_path(path, upload_params());
+            let upload_result = match first {
+                Err(err) if !UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) => {
+                    info!("上传中断，按断点记录重试: {} - {}", key, err);
+                    auto_uploader.upload_path(path, upload_params())
+                }
+                other => other,
+            };
+
+            match upload_result {
                 Ok(_) => {
                     // 极端情况下完成瞬间才取消，仍记为成功
                     info!("上传成功: {}", key);
