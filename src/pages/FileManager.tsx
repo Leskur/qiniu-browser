@@ -1,12 +1,11 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchFiles, fetchBucketDomains, QiniuFile, deleteFile, deleteDirectory, generateDownloadUrl, batchDeleteFiles, renameFile, createFolder } from "../lib/qiniu";
-import { Skeleton } from "../components/ui/skeleton";
 import {
   File, Image, Film, FileText, Archive,
   Link2, Copy, Check, RefreshCw, Trash2, Upload, FolderOpen,
   Folder, ChevronRight, AlertCircle, Database, Download, X, Square, CheckSquare, ArrowUpDown, ArrowUp, ArrowDown, Pencil, ArrowLeft, ArrowRight,
-  HardDrive, FileBox, Search, FolderPlus, ZoomIn, ChevronLeft, Maximize2, Bookmark
+  Search, FolderPlus, ZoomIn, ChevronLeft, Maximize2, Bookmark, Loader2, ChevronDown
 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -16,6 +15,9 @@ import { FolderUploadDialog } from "../components/FolderUploadDialog";
 import { useTransferStore, type TransferTask } from "../store/transfer";
 import { useAppStore } from "../store";
 import { formatBytes, formatQiniuTime } from "../lib/utils";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Popover, PopoverTrigger, PopoverContent } from "../components/ui/popover";
 
 export function getFileIcon(mimeType: string) {
   if (mimeType?.startsWith('image/')) return <Image className="w-4 h-4 text-emerald-500 shrink-0" />;
@@ -72,6 +74,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   
   // Folder upload dialog
   const [folderUploadPath, setFolderUploadPath] = useState<string | null>(null);
+  const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
 
   // ── Virtual folder navigation + history ──
   const [currentPrefix, setCurrentPrefix] = useState("");
@@ -80,6 +83,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
   const canGoBack    = navIndex > 0;
   const canGoForward = navIndex < navHistory.length - 1;
+  const canGoUp      = currentPrefix !== "";
 
   const navigate = (prefix: string) => {
     setCurrentPrefix(prefix);
@@ -92,16 +96,13 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
   const goBack = useCallback(() => {
     if (!canGoBack) {
-      // Already at root and can't go back further, return to bucket list
-      if (currentPrefix === "") {
-        onBack();
-      }
+      onBack();
       return;
     }
     const target = navHistory[navIndex - 1];
     setNavIndex(i => i - 1);
     setCurrentPrefix(target);
-  }, [canGoBack, navHistory, navIndex, currentPrefix, onBack]);
+  }, [canGoBack, navHistory, navIndex, onBack]);
 
   const goForward = useCallback(() => {
     if (!canGoForward) return;
@@ -109,6 +110,16 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     setNavIndex(i => i + 1);
     setCurrentPrefix(target);
   }, [canGoForward, navHistory, navIndex]);
+
+  const goUp = useCallback(() => {
+    if (!canGoUp) return;
+    const parts = currentPrefix.replace(/\/$/, "").split("/").filter(Boolean);
+    parts.pop();
+    const parent = parts.length ? `${parts.join("/")}/` : "";
+    setCurrentPrefix(parent);
+    setNavHistory(prev => [...prev.slice(0, navIndex + 1), parent]);
+    setNavIndex(i => i + 1);
+  }, [canGoUp, currentPrefix, navIndex]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -192,8 +203,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
   // ── Search state ──
   const [searchInput, setSearchInput] = useState("");
-  const [committedSearch, setCommittedSearch] = useState(""); // 回车后才生效的前缀
-  const [searchActive, setSearchActive] = useState(false);
+  const [committedSearch, setCommittedSearch] = useState(""); // 已生效的前缀过滤
   const searchInputRef = useRef<HTMLInputElement>(null);
   const inApiSearchRef = useRef(false);
   const searchRequestId = useRef(0);
@@ -348,8 +358,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
         case 'F':
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
-            setSearchActive(true);
-            setTimeout(() => searchInputRef.current?.focus(), 50);
+            searchInputRef.current?.focus();
           }
           break;
       }
@@ -370,8 +379,10 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   };
 
   const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 ml-1 opacity-40" />;
-    return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 ml-1" /> : <ArrowDown className="w-3 h-3 ml-1" />;
+    if (sortField !== field) return <ArrowUpDown className="ml-1 inline-block size-3 shrink-0 text-zinc-300 dark:text-zinc-700" />;
+    return sortDir === "asc"
+      ? <ArrowUp className="ml-1 inline-block size-3 shrink-0 text-emerald-500" />
+      : <ArrowDown className="ml-1 inline-block size-3 shrink-0 text-emerald-500" />;
   };
 
   // ── Rename state ──
@@ -591,7 +602,6 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   const clearSearch = useCallback(() => {
     setSearchInput("");
     setCommittedSearch("");
-    setSearchActive(false);
     if (inApiSearchRef.current) {
       inApiSearchRef.current = false;
       loadDirectory(currentPrefix);
@@ -631,6 +641,15 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     }
   }, [ak, sk, bucket, itemsPerPage, loadDirectory]);
 
+  // 输入防抖自动前缀过滤；清空则恢复当前目录
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (searchInput.trim() === committedSearch.trim()) return;
+      void runPrefixSearch(searchInput);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput, committedSearch, runPrefixSearch]);
+
   /** 刷新当前视图：搜索中则重跑前缀搜索，否则刷新目录 */
   const refreshCurrentView = useCallback(async (forceRefresh = true) => {
     const q = committedSearch.trim();
@@ -647,11 +666,11 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
       if (previewFile) { closePreview(); return; }
       if (ctxMenu) { closeCtxMenu(); return; }
       if (selectedFile) { setSelectedFile(null); return; }
-      if (searchActive) { clearSearch(); return; }
+      if (searchInput || committedSearch) { clearSearch(); return; }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [ctxMenu, selectedFile, searchActive, previewFile, clearSearch]);
+  }, [ctxMenu, selectedFile, searchInput, committedSearch, previewFile, clearSearch]);
 
   // ─── Load more (next page) ────────────────────────────────────────────────
   const loadMore = useCallback(async () => {
@@ -693,7 +712,6 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     loadDirectory(currentPrefix);
     setSearchInput("");
     setCommittedSearch("");
-    setSearchActive(false);
   }, [currentPrefix, loadDirectory]);
 
   // ─── Derived entries for current level ───────────────────────────────────
@@ -755,9 +773,12 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
   // ── 书签：从外部跳转到指定 prefix ──
   const addBookmark = useAppStore((s) => s.addBookmark);
+  const removeBookmark = useAppStore((s) => s.removeBookmark);
+  const updateBookmark = useAppStore((s) => s.updateBookmark);
   const bookmarkList = useAppStore((s) => s.bookmarks[ak]) ?? [];
   const [showBookmarkDialog, setShowBookmarkDialog] = useState(false);
   const [bookmarkLabel, setBookmarkLabel] = useState("");
+  const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialPrefix !== undefined && initialPrefix !== "") {
@@ -766,17 +787,58 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     }
   }, [initialPrefix]);
 
-  const handleAddBookmark = () => {
-    const label = bookmarkLabel.trim() || (currentPrefix ? `${bucket}/${currentPrefix.replace(/\/$/, "")}` : bucket);
-    addBookmark(ak, { bucket, prefix: currentPrefix, label });
-    toast.success("书签已添加", { description: label });
-    setShowBookmarkDialog(false);
-    setBookmarkLabel("");
+  const defaultBookmarkLabel = () => {
+    const parts = currentPrefix.replace(/\/$/, "").split("/").filter(Boolean);
+    return parts[parts.length - 1] || bucket;
   };
 
-  const isCurrentBookmarked = useMemo(() => {
-    return bookmarkList.some(b => b.bucket === bucket && b.prefix === currentPrefix);
-  }, [bookmarkList, bucket, currentPrefix]);
+  const currentBookmark = useMemo(
+    () => bookmarkList.find(b => b.bucket === bucket && b.prefix === currentPrefix),
+    [bookmarkList, bucket, currentPrefix],
+  );
+  const isCurrentBookmarked = !!currentBookmark;
+  const isEditingBookmark = !!editingBookmarkId;
+
+  const closeBookmarkDialog = () => {
+    setShowBookmarkDialog(false);
+    setBookmarkLabel("");
+    setEditingBookmarkId(null);
+  };
+
+  const handleBookmarkClick = () => {
+    if (currentBookmark) {
+      setEditingBookmarkId(currentBookmark.id);
+      setBookmarkLabel(currentBookmark.label);
+      setShowBookmarkDialog(true);
+      return;
+    }
+    setEditingBookmarkId(null);
+    setBookmarkLabel(defaultBookmarkLabel());
+    setShowBookmarkDialog(true);
+  };
+
+  const handleBookmarkDone = () => {
+    const label = bookmarkLabel.trim() || defaultBookmarkLabel();
+    if (editingBookmarkId) {
+      updateBookmark(ak, editingBookmarkId, { label });
+    } else {
+      addBookmark(ak, { bucket, prefix: currentPrefix, label });
+      toast.success("书签已添加", { description: label });
+    }
+    closeBookmarkDialog();
+  };
+
+  const handleBookmarkCancel = () => {
+    closeBookmarkDialog();
+  };
+
+  const handleBookmarkRemove = () => {
+    if (editingBookmarkId) {
+      removeBookmark(ak, editingBookmarkId);
+      toast.success("书签已移除");
+    }
+    closeBookmarkDialog();
+  };
 
   const rowVirtualizer = useVirtualizer({
     count: sortedEntries.length,
@@ -1084,34 +1146,167 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="relative flex flex-col h-full bg-white dark:bg-zinc-950 overflow-hidden">
+    <div className="relative flex h-full flex-col overflow-hidden bg-white dark:bg-zinc-950">
 
       {/* ── Top Bar ── */}
-      <div className="flex h-14 items-center gap-3 px-6 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm shrink-0 min-w-0 relative z-20">
-        <button onClick={goBack} disabled={!canGoBack} title="后退（鼠标侧键）"
-          className="p-1.5 rounded-lg transition-colors text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 active:scale-95 shrink-0 disabled:opacity-30 disabled:pointer-events-none cursor-pointer">
-          <ArrowLeft className="w-4 h-4" />
-        </button>
-        <button onClick={goForward} disabled={!canGoForward} title="前进（鼠标侧键）"
-          className="p-1.5 rounded-lg transition-colors text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 active:scale-95 shrink-0 disabled:opacity-30 disabled:pointer-events-none cursor-pointer">
-          <ArrowRight className="w-4 h-4" />
-        </button>
+      <div className="relative z-20 shrink-0 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="flex h-12 items-center gap-2 px-6">
+          <div className="flex shrink-0 items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={goBack}
+              title={canGoBack ? "后退（鼠标侧键）" : "返回空间列表"}
+              aria-label={canGoBack ? "后退" : "返回空间列表"}
+            >
+              <ArrowLeft />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={goForward} disabled={!canGoForward} title="前进（鼠标侧键）" aria-label="前进">
+              <ArrowRight />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={goUp} disabled={!canGoUp} title="上一级" aria-label="上一级">
+              <ArrowUp />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={loading}
+              title="刷新"
+              aria-label="刷新"
+              onClick={() => {
+                const now = Date.now();
+                if (now - lastRefreshTime < REFRESH_COOLDOWN) {
+                  toast.info("刷新太频繁，请稍后再试");
+                  return;
+                }
+                setLastRefreshTime(now);
+                refreshCurrentView(true);
+              }}
+            >
+              <RefreshCw className={loading ? "animate-spin" : undefined} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title={isCurrentBookmarked ? "修改书签" : "添加书签"}
+              aria-label={isCurrentBookmarked ? "修改书签" : "添加书签"}
+              className={isCurrentBookmarked ? "text-amber-500" : undefined}
+              onClick={handleBookmarkClick}
+            >
+              <Bookmark fill={isCurrentBookmarked ? "currentColor" : "none"} />
+            </Button>
+          </div>
 
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-0.5 flex-1 min-w-0 overflow-hidden">
-          <button onClick={onBack} className="text-sm font-medium text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 transition-colors shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 cursor-pointer">
-            空间管理
-          </button>
-          <ChevronRight className="w-3.5 h-3.5 text-zinc-300 dark:text-zinc-600 shrink-0" />
+          <div className="flex-1" />
+
+          {someSelected ? (
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
+                已选 {selectedKeys.size} 项
+              </span>
+              <Button variant="outline" onClick={handleBatchDownload}>
+                <Download />批量下载
+              </Button>
+              <Button variant="destructive" onClick={() => setBatchDeletePending(true)}>
+                <Trash2 />批量删除
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => setSelectedKeys(new Set())} title="取消选择" aria-label="取消选择">
+                <X />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex shrink-0 items-center gap-2">
+              <div className="relative w-52">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchInput}
+                  onChange={e => setSearchInput(e.target.value)}
+                  placeholder="前缀过滤…"
+                  aria-label="按路径前缀过滤"
+                  title="匹配当前目录下的 key 前缀，区分大小写，输入后自动过滤"
+                  className="pl-8 pr-14"
+                  onKeyDown={e => {
+                    if (e.key === "Escape") { clearSearch(); (e.target as HTMLInputElement).blur(); }
+                    if (e.key === "Enter") { e.preventDefault(); void runPrefixSearch(searchInput); }
+                  }}
+                />
+                <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+                  {committedSearch && (
+                    <span className="px-0.5 text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500" title={`${sortedEntries.length} 个结果`}>
+                      {sortedEntries.length}
+                    </span>
+                  )}
+                  {(searchInput || committedSearch) && (
+                    <button
+                      type="button"
+                      onClick={() => clearSearch()}
+                      className="rounded p-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                      aria-label="清除过滤"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <Popover open={uploadMenuOpen} onOpenChange={setUploadMenuOpen}>
+                <PopoverTrigger
+                  render={<Button disabled={isUploading || loading} />}
+                  aria-label="上传"
+                  title="上传"
+                >
+                  {isUploading ? <Loader2 className="animate-spin" /> : <Upload />}
+                  上传
+                  <ChevronDown className="size-3.5 opacity-70" />
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-44 p-1">
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-zinc-700 transition-colors hover:bg-accent dark:text-zinc-200"
+                    onClick={() => { setUploadMenuOpen(false); handleUpload(false); }}
+                  >
+                    <Upload className="size-4 text-muted-foreground" />
+                    上传文件
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-zinc-700 transition-colors hover:bg-accent dark:text-zinc-200"
+                    onClick={() => { setUploadMenuOpen(false); handleUpload(true); }}
+                  >
+                    <FolderOpen className="size-4 text-muted-foreground" />
+                    上传文件夹
+                  </button>
+                </PopoverContent>
+              </Popover>
+              <Button variant="outline" onClick={() => { setShowCreateFolder(true); setNewFolderName(""); }} disabled={loading} title="新建文件夹">
+                <FolderPlus />
+                新建文件夹
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* ── Path row ── */}
+        <div className="flex min-w-0 items-center gap-1 overflow-x-auto px-6 py-2">
           <button
-            onClick={() => navigateToBreadcrumb(-1)}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-sm transition-colors whitespace-nowrap shrink-0 cursor-pointer ${breadcrumbs.length === 0 ? 'font-semibold text-zinc-900 dark:text-zinc-100 bg-zinc-100 dark:bg-zinc-800/70' : 'font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+            type="button"
+            onClick={onBack}
+            className="shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
           >
-            <Database className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-            <span className="truncate max-w-[120px]">{bucket}</span>
+            空间列表
+          </button>
+          <ChevronRight className="size-3.5 shrink-0 text-zinc-300 dark:text-zinc-600" />
+          <button
+            type="button"
+            onClick={() => navigateToBreadcrumb(-1)}
+            className={`flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-sm transition-colors ${breadcrumbs.length === 0 ? "font-semibold text-zinc-900 dark:text-zinc-100" : "font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"}`}
+          >
+            <Database className="size-3.5 shrink-0 text-emerald-500" />
+            <span>{bucket}</span>
           </button>
           {breadcrumbs.length > 0 && (() => {
-            const SHOW_TAIL = 2;
+            const SHOW_TAIL = 4;
             const collapsed = breadcrumbs.length > SHOW_TAIL + 1;
             const visibleHead = collapsed ? [] : breadcrumbs.slice(0, -1);
             const visibleTail = collapsed ? breadcrumbs.slice(-SHOW_TAIL) : [breadcrumbs[breadcrumbs.length - 1]];
@@ -1119,29 +1314,30 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
             return (
               <>
                 {visibleHead.map((seg, i) => (
-                  <span key={i} className="flex items-center shrink-0">
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-300 dark:text-zinc-600" />
-                    <button onClick={() => navigateToBreadcrumb(i)}
-                      className="px-2 py-1 rounded-md text-sm font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors whitespace-nowrap">
+                  <span key={i} className="flex shrink-0 items-center">
+                    <ChevronRight className="size-3.5 text-zinc-300 dark:text-zinc-600" />
+                    <button type="button" onClick={() => navigateToBreadcrumb(i)}
+                      className="whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200">
                       {seg}
                     </button>
                   </span>
                 ))}
                 {collapsed && (
-                  <span className="flex items-center shrink-0 relative">
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-300 dark:text-zinc-600" />
+                  <span className="relative flex shrink-0 items-center">
+                    <ChevronRight className="size-3.5 text-zinc-300 dark:text-zinc-600" />
                     <button
+                      type="button"
                       onClick={() => setBreadcrumbMenuOpen(o => !o)}
-                      className="px-2 py-1 rounded-md text-sm font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                      className="rounded-md px-2 py-1 text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
                     >…</button>
                     {breadcrumbMenuOpen && (
                       <>
                         <div className="fixed inset-0 z-40" onClick={() => setBreadcrumbMenuOpen(false)} />
-                        <div className="absolute top-full left-0 mt-1 z-50 min-w-36 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-xl py-1">
+                        <div className="absolute top-full left-0 z-50 mt-1 max-h-64 min-w-36 overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
                           {hiddenMiddle.map((seg, i) => (
-                            <button key={i}
+                            <button key={i} type="button"
                               onClick={() => { navigateToBreadcrumb(i); setBreadcrumbMenuOpen(false); }}
-                              className="w-full text-left px-3 py-1.5 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors truncate"
+                              className="w-full truncate px-3 py-1.5 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
                             >{seg}</button>
                           ))}
                         </div>
@@ -1153,16 +1349,17 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                   const i = collapsed ? breadcrumbs.length - SHOW_TAIL + relIdx : breadcrumbs.length - 1;
                   const isLast = relIdx === visibleTail.length - 1;
                   return (
-                    <span key={i} className="flex items-center min-w-0">
-                      <ChevronRight className="w-3.5 h-3.5 text-zinc-300 dark:text-zinc-600 shrink-0" />
+                    <span key={i} className="flex min-w-0 shrink-0 items-center">
+                      <ChevronRight className="size-3.5 shrink-0 text-zinc-300 dark:text-zinc-600" />
                       <button
+                        type="button"
                         onClick={() => navigateToBreadcrumb(i)}
-                        className={`px-2 py-1 rounded-md text-sm transition-colors whitespace-nowrap ${
+                        className={`max-w-[240px] truncate rounded-md px-2 py-1 text-sm transition-colors ${
                           isLast
-                            ? 'font-semibold text-zinc-900 dark:text-zinc-100 bg-zinc-200/70 dark:bg-zinc-800/70 truncate max-w-[160px]'
-                            : 'font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 shrink-0'
+                            ? "font-semibold text-zinc-900 dark:text-zinc-100"
+                            : "font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
                         }`}
-                        title={isLast ? seg : undefined}
+                        title={seg}
                       >{seg}</button>
                     </span>
                   );
@@ -1171,286 +1368,111 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
             );
           })()}
         </div>
-
-        {/* Batch action bar (replaces upload buttons when items selected) */}
-        {someSelected ? (
-          <div className="flex items-center gap-2 shrink-0 ml-2">
-            <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
-              已选 <strong className="text-zinc-700 dark:text-zinc-200">{selectedKeys.size}</strong> 项
-            </span>
-            <button
-              onClick={handleBatchDownload}
-            className="flex h-8 items-center gap-1.5 px-3 text-sm font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors"
-          >
-            <Download className="w-4 h-4" />批量下载
-          </button>
-            <button
-              onClick={() => setBatchDeletePending(true)}
-              className="flex h-8 items-center gap-1.5 px-3 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />批量删除
-            </button>
-            <button
-              onClick={() => setSelectedKeys(new Set())}
-              className="flex size-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-              title="取消选择"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        ) : (
-        <div className="flex items-center gap-2 shrink-0 ml-2">
-          <button
-            onClick={() => {
-              const now = Date.now();
-              if (now - lastRefreshTime < REFRESH_COOLDOWN) {
-                toast.info('刷新太频繁，请稍后再试');
-                return;
-              }
-              setLastRefreshTime(now);
-              refreshCurrentView(true);
-            }}
-            disabled={loading}
-            title="刷新"
-            className="flex size-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-          <button
-            onClick={() => {
-              setSearchActive(true);
-              setTimeout(() => searchInputRef.current?.focus(), 50);
-            }}
-            title="搜索 (Ctrl+F)"
-            className={`flex size-8 items-center justify-center rounded-lg transition-colors ${searchActive || committedSearch ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'}`}
-          >
-            <Search className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => {
-              if (isCurrentBookmarked) {
-                toast.info("当前位置已在书签中");
-                return;
-              }
-              setBookmarkLabel("");
-              setShowBookmarkDialog(true);
-            }}
-            title="添加书签"
-            className={`flex size-8 items-center justify-center rounded-lg transition-colors ${isCurrentBookmarked ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' : 'text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'}`}
-          >
-            <Bookmark className="w-4 h-4" fill={isCurrentBookmarked ? "currentColor" : "none"} />
-          </button>
-          <button
-            onClick={() => handleUpload(false)}
-            disabled={isUploading || loading}
-            className="flex h-8 items-center gap-1.5 px-3 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:pointer-events-none"
-          >
-            {isUploading
-              ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              : <Upload className="w-4 h-4" />}
-            上传文件
-          </button>
-          <button
-            onClick={() => handleUpload(true)}
-            disabled={isUploading || loading}
-            className="flex h-8 items-center gap-1.5 px-3 text-sm font-medium text-zinc-700 dark:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 rounded-lg transition-all disabled:opacity-50 disabled:pointer-events-none"
-          >
-            <FolderOpen className="w-4 h-4" />
-            上传文件夹
-          </button>
-          <button
-            onClick={() => { setShowCreateFolder(true); setNewFolderName(""); }}
-            disabled={loading}
-            className="flex h-8 items-center gap-1.5 px-3 text-sm font-medium text-zinc-700 dark:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 rounded-lg transition-all disabled:opacity-50 disabled:pointer-events-none"
-            title="新建文件夹"
-          >
-            <FolderPlus className="w-4 h-4" />
-            新建文件夹
-          </button>
-        </div>
-        )}
       </div>
 
-      {/* ── Stats Bar ── */}
-      {!loading && !someSelected && (bucketInfo || items.length > 0) && (
-        <div className="flex items-center gap-4 px-6 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 text-xs text-zinc-400 dark:text-zinc-500 tabular-nums shrink-0">
-          {bucketInfo ? (
-            <>
-              <span className="flex items-center gap-1">
-                <Database className="w-3.5 h-3.5" />
-                <strong className="font-medium text-zinc-500 dark:text-zinc-400">{bucket}</strong>
-              </span>
-              <span className="text-zinc-300 dark:text-zinc-600">|</span>
-              <span className="flex items-center gap-1">
-                <FileBox className="w-3.5 h-3.5" />
-                文件数：<strong className="font-medium text-zinc-500 dark:text-zinc-400">{bucketInfo.file_num.toLocaleString()}</strong>
-              </span>
-              <span className="flex items-center gap-1">
-                <HardDrive className="w-3.5 h-3.5" />
-                存储占用：<strong className="font-medium text-zinc-500 dark:text-zinc-400">{formatBytes(bucketInfo.storage_size)}</strong>
-              </span>
-            </>
-          ) : (
-            <span>当前目录：<strong className="font-medium text-zinc-500 dark:text-zinc-400">{items.length}</strong> 项</span>
-          )}
-        </div>
-      )}
-
-      {/* ── Search Bar ── */}
-      {searchActive && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/40 shrink-0">
-          <Search className="w-4 h-4 text-zinc-400 shrink-0" />
-          <input
-            ref={searchInputRef}
-            type="text"
-            value={searchInput}
-            onChange={e => setSearchInput(e.target.value)}
-            placeholder="匹配 key 前缀（非文件名），回车搜索…"
-            className="flex-1 bg-transparent text-sm text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 outline-none"
-            onKeyDown={e => {
-              if (e.key === 'Escape') { clearSearch(); }
-              if (e.key === 'Enter') { e.preventDefault(); runPrefixSearch(searchInput); }
-            }}
-          />
-          {committedSearch && (
-            <span className="text-xs text-zinc-400 tabular-nums shrink-0">
-              {sortedEntries.length} 个结果
-            </span>
-          )}
-          <button
-            onClick={() => clearSearch()}
-            className="p-1 rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shrink-0"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-      {searchActive && !committedSearch && (
-        <div className="px-4 py-1.5 border-b border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/20 shrink-0">
-          <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
-            仅匹配当前目录下以输入内容开头的路径，例如输入 <code className="font-mono text-zinc-500">images/</code>，不会搜到路径中间的文件名
-          </p>
-        </div>
-      )}
-
       {/* ── Content ── */}
-      <div className="flex-1 overflow-hidden relative">
-        {/* Drag overlay */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         {isDragOver && (
-          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-emerald-50/90 dark:bg-emerald-950/80 border-2 border-dashed border-emerald-400 dark:border-emerald-500 rounded-none pointer-events-none">
-            <Upload className="w-12 h-12 text-emerald-500" />
+          <div className="pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 border-2 border-dashed border-emerald-400 bg-emerald-50/90 dark:border-emerald-500 dark:bg-emerald-950/80">
+            <Upload className="size-12 text-emerald-500" />
             <p className="text-base font-semibold text-emerald-700 dark:text-emerald-300">松开以上传到当前目录</p>
-            <p className="text-sm text-emerald-600 dark:text-emerald-400 opacity-70">{currentPrefix || bucket}</p>
+            <p className="text-sm text-emerald-600 opacity-70 dark:text-emerald-400">{currentPrefix || bucket}</p>
           </div>
         )}
         {loading ? (
-          <div className="p-6 space-y-3">
-            {Array.from({ length: 10 }).map((_, i) => (
-              <Skeleton key={i} className="h-11 w-full dark:bg-zinc-800/50" style={{ opacity: 1 - i * 0.08 }} />
-            ))}
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 p-20 text-zinc-500 h-full">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-emerald-600 dark:border-zinc-800" />
+            <p className="text-sm">正在获取文件列表...</p>
           </div>
         ) : error ? (
-          <div className="flex flex-col items-center justify-center h-full p-12 text-center">
-            <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
-            <p className="text-red-500 font-medium">加载失败</p>
-            <p className="text-sm text-zinc-400 mt-1">{error}</p>
-            <button
-              onClick={() => refreshCurrentView(true)}
-              className="mt-4 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-            >重试</button>
+          <div className="m-6 rounded-xl border border-red-200 bg-red-50 p-6 text-red-600 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
+            <div className="mb-2 flex items-center gap-2 font-medium">
+              <AlertCircle className="size-4" /> 加载失败
+            </div>
+            <div className="mb-4 break-all rounded bg-red-100/50 p-2 font-mono text-xs dark:bg-red-900/20">{error}</div>
+            <Button variant="outline" size="sm" onClick={() => refreshCurrentView(true)}>重试</Button>
           </div>
         ) : entries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full p-20 text-center text-zinc-400">
-            <Folder className="w-16 h-16 mb-4 opacity-20" />
-            <p className="text-lg font-medium text-zinc-500">
-              {committedSearch
-                ? "没有匹配的前缀结果"
-                : currentPrefix ? "该文件夹是空的" : "空间中没有文件"}
-            </p>
-            <p className="text-sm mt-1 max-w-sm">
-              {committedSearch
-                ? "搜索只匹配路径前缀。若要找 images/logo.png，请输入 images/logo 或 images/"
-                : "上传一些文件来开始吧"}
-            </p>
+          <div className="flex h-full flex-col items-center justify-center gap-3 p-16 text-center">
+            <Folder className="size-8 text-zinc-300 dark:text-zinc-600" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+                {committedSearch
+                  ? "没有匹配的前缀结果"
+                  : currentPrefix ? "该文件夹是空的" : "空间中没有文件"}
+              </p>
+              <p className="max-w-xs text-xs text-zinc-400 dark:text-zinc-500">
+                {committedSearch
+                  ? "搜索只匹配路径前缀，例如 images/ 或 images/logo"
+                  : "上传文件后即可在此管理"}
+              </p>
+            </div>
           </div>
         ) : (
           <div ref={scrollContainerRef} className="h-full overflow-y-auto">
-            {/* Sticky header */}
             <table className="w-full text-sm">
-              <thead className="sticky top-0 z-10 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <thead className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50/80 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-900/80">
                 <tr>
-                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap pl-4 w-10">
-                    <button onClick={toggleSelectAll} className="p-0.5 text-zinc-400 hover:text-emerald-500 transition-colors">
+                  <th className="h-10 w-10 whitespace-nowrap px-2 pl-4 text-left align-middle">
+                    <button type="button" onClick={toggleSelectAll} className="p-0.5 text-zinc-400 transition-colors hover:text-emerald-500" aria-label="全选">
                       {allSelected
-                        ? <CheckSquare className="w-4 h-4 text-emerald-500 shrink-0" />
-                        : <Square className="w-4 h-4 shrink-0" />}
+                        ? <CheckSquare className="size-4 shrink-0 text-emerald-500" />
+                        : <Square className="size-4 shrink-0" />}
                     </button>
                   </th>
-                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap pl-1">
-                    <button onClick={() => cycleSort('name')} className="flex items-center text-xs font-semibold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
-                      名称<SortIcon field="name" />
-                    </button>
+                  <th className="h-10 cursor-pointer select-none whitespace-nowrap px-2 pl-1 text-left align-middle text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/50" onClick={() => cycleSort("name")}>
+                    <span className="inline-flex items-center">名称<SortIcon field="name" /></span>
                   </th>
-                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-28">
-                    <button onClick={() => cycleSort('size')} className="flex items-center text-xs font-semibold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
-                      大小<SortIcon field="size" />
-                    </button>
+                  <th className="h-10 w-28 cursor-pointer select-none whitespace-nowrap px-2 text-left align-middle text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/50" onClick={() => cycleSort("size")}>
+                    <span className="inline-flex items-center">大小<SortIcon field="size" /></span>
                   </th>
-                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-52 hidden md:table-cell text-xs font-semibold text-zinc-500">类型</th>
-                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-44 hidden lg:table-cell">
-                    <button onClick={() => cycleSort('time')} className="flex items-center text-xs font-semibold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
-                      修改时间<SortIcon field="time" />
-                    </button>
+                  <th className="hidden h-10 w-52 whitespace-nowrap px-2 text-left align-middle text-xs font-medium text-zinc-500 md:table-cell dark:text-zinc-400">类型</th>
+                  <th className="hidden h-10 w-44 cursor-pointer select-none whitespace-nowrap px-2 text-left align-middle text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 lg:table-cell dark:text-zinc-400 dark:hover:bg-zinc-800/50" onClick={() => cycleSort("time")}>
+                    <span className="inline-flex items-center">修改时间<SortIcon field="time" /></span>
                   </th>
-                  <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-right pr-5 w-44 text-xs font-semibold text-zinc-500">操作</th>
+                  <th className="h-10 w-36 whitespace-nowrap px-2 pr-5 text-right text-xs font-medium text-zinc-500 dark:text-zinc-400" />
                 </tr>
               </thead>
             </table>
 
-            {/* Virtual rows */}
-            <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
+            <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
               {rowVirtualizer.getVirtualItems().map(virtualRow => {
                 const entry = sortedEntries[virtualRow.index];
                 const rowStyle: React.CSSProperties = {
-                  position: 'absolute',
+                  position: "absolute",
                   top: 0,
                   left: 0,
-                  width: '100%',
+                  width: "100%",
                   height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start}px)`,
                 };
 
-                if (entry.type === 'folder') {
+                if (entry.type === "folder") {
                   return (
                     <div
                       key={`d:${entry.prefix}`}
                       style={rowStyle}
-                      className={`group flex items-center cursor-pointer border-b border-zinc-100 dark:border-zinc-800/60 hover:bg-amber-50/40 dark:hover:bg-amber-900/10 transition-colors text-sm ${dirToDelete === entry.prefix && isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
+                      className={`group flex cursor-pointer items-center border-b border-zinc-100 text-sm transition-colors hover:bg-zinc-50 dark:border-zinc-800/80 dark:hover:bg-zinc-900/50 ${dirToDelete === entry.prefix && isDeleting ? "pointer-events-none opacity-40" : ""}`}
                       onClick={() => navigateToFolder(entry.prefix)}
                     >
-                      <div className="pl-4 w-10 shrink-0" />
-                      <div className="flex-1 pl-1 flex items-center gap-3 min-w-0">
-                        <Folder className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span className="font-medium text-zinc-700 dark:text-zinc-200 truncate w-full min-w-0">
+                      <div className="w-10 shrink-0 pl-4" />
+                      <div className="flex min-w-0 flex-1 items-center gap-3 pl-1">
+                        <Folder className="size-4 shrink-0 text-amber-400" />
+                        <span className="min-w-0 w-full truncate font-medium text-zinc-800 transition-colors group-hover:text-emerald-600 dark:text-zinc-100 dark:group-hover:text-emerald-400">
                           <HighlightText text={entry.name} query={committedSearch} />
                         </span>
                       </div>
-                      <div className="w-28 shrink-0 text-zinc-400">—</div>
-                      <div className="w-52 shrink-0 hidden md:block">
-                        <span className="bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded text-xs font-medium">文件夹</span>
-                      </div>
-                      <div className="w-44 shrink-0 hidden lg:block text-zinc-400">—</div>
-                      <div className="w-44 shrink-0 pr-5">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={(e) => { e.stopPropagation(); handleDownloadFolder(entry.prefix); }}
-                            className="p-1.5 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded" title="下载整个文件夹">
-                            <Download className="w-4 h-4" />
-                          </button>
-                          <button onClick={(e) => { e.stopPropagation(); setDirToDelete(entry.prefix); }}
-                            className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded" title="删除整个目录">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                          <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600 ml-1" />
+                      <div className="w-28 shrink-0 text-xs text-zinc-400">—</div>
+                      <div className="hidden w-52 shrink-0 text-xs text-zinc-500 md:block dark:text-zinc-400">文件夹</div>
+                      <div className="hidden w-44 shrink-0 text-xs text-zinc-400 lg:block">—</div>
+                      <div className="w-36 shrink-0 pr-5">
+                        <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                          <Button type="button" variant="ghost" size="icon-xs" title="下载整个文件夹" aria-label="下载整个文件夹" className="text-zinc-400" onClick={(e) => { e.stopPropagation(); handleDownloadFolder(entry.prefix); }}>
+                            <Download />
+                          </Button>
+                          <Button type="button" variant="ghost" size="icon-xs" title="删除整个目录" aria-label="删除整个目录" className="text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/40 dark:hover:text-red-400" onClick={(e) => { e.stopPropagation(); setDirToDelete(entry.prefix); }}>
+                            <Trash2 />
+                          </Button>
                         </div>
                       </div>
                     </div>
@@ -1467,30 +1489,30 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                     onClick={() => !someSelected && !isRenaming && setSelectedFile(file)}
                     onDoubleClick={() => !isRenaming && openPreview(file)}
                     onContextMenu={(e) => openCtxMenu(e, file)}
-                    className={`group flex items-center cursor-pointer border-b border-zinc-100 dark:border-zinc-800/60 transition-colors text-sm
-                      ${isChecked ? 'bg-emerald-50/60 dark:bg-emerald-900/10 hover:bg-emerald-50 dark:hover:bg-emerald-900/20' : 'hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30'}
-                      ${fileToDelete === file.key && isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
+                    className={`group flex cursor-pointer items-center border-b border-zinc-100 text-sm transition-colors dark:border-zinc-800/80
+                      ${isChecked ? "bg-emerald-50/60 hover:bg-emerald-50 dark:bg-emerald-900/10 dark:hover:bg-emerald-900/20" : "hover:bg-zinc-50 dark:hover:bg-zinc-900/50"}
+                      ${fileToDelete === file.key && isDeleting ? "pointer-events-none opacity-40" : ""}`}
                   >
-                    <div className="pl-4 w-10 shrink-0" onClick={e => toggleSelect(file.key, e)}>
-                      <button className="p-0.5 text-zinc-400 hover:text-emerald-500 transition-colors">
+                    <div className="w-10 shrink-0 pl-4" onClick={e => toggleSelect(file.key, e)}>
+                      <button type="button" className="p-0.5 text-zinc-400 transition-colors hover:text-emerald-500" aria-label={isChecked ? "取消选择" : "选择"}>
                         {isChecked
-                          ? <CheckSquare className="w-4 h-4 text-emerald-500 shrink-0" />
-                          : <Square className="w-4 h-4 opacity-0 group-hover:opacity-100 shrink-0" />}
+                          ? <CheckSquare className="size-4 shrink-0 text-emerald-500" />
+                          : <Square className="size-4 shrink-0 opacity-0 group-hover:opacity-100" />}
                       </button>
                     </div>
-                    <div className="flex-1 pl-1 flex items-center gap-3 min-w-0">
+                    <div className="flex min-w-0 flex-1 items-center gap-3 pl-1">
                       {getFileIcon(file.mimeType)}
                       {isRenaming ? (
                         <input autoFocus value={renameValue}
                           onChange={e => setRenameValue(e.target.value)}
                           onBlur={() => commitRename(file.key)}
-                          onKeyDown={e => { if (e.key === 'Enter') commitRename(file.key); if (e.key === 'Escape') setRenamingKey(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") commitRename(file.key); if (e.key === "Escape") setRenamingKey(null); }}
                           onClick={e => e.stopPropagation()}
-                          className="file-name-input flex-1 w-full min-w-0 px-2 py-0.5 text-sm rounded border border-emerald-400 dark:border-emerald-600 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-emerald-400/40"
+                          className="file-name-input min-w-0 w-full flex-1 rounded border border-emerald-400 bg-white px-2 py-0.5 text-sm text-zinc-800 outline-none focus:ring-2 focus:ring-emerald-400/40 dark:border-emerald-600 dark:bg-zinc-800 dark:text-zinc-100"
                         />
                       ) : (
                         <>
-                          <span className="truncate min-w-0 text-zinc-700 dark:text-zinc-200" title={file.key}>
+                          <span className="min-w-0 truncate text-zinc-800 transition-colors group-hover:text-emerald-600 dark:text-zinc-100 dark:group-hover:text-emerald-400" title={file.key}>
                             <HighlightText text={entry.name} query={committedSearch} />
                           </span>
                           <button
@@ -1498,40 +1520,39 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                             onClick={(e) => { void handleCopyFileName(e, file.key); }}
                             onDoubleClick={(e) => e.stopPropagation()}
                             title="复制文件名"
-                            aria-label={`复制文件名：${file.key.slice(file.key.lastIndexOf('/') + 1)}`}
-                            className="shrink-0 p-1 rounded text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                            aria-label={`复制文件名：${file.key.slice(file.key.lastIndexOf("/") + 1)}`}
+                            className="shrink-0 rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-600 group-hover:opacity-100 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
                           >
-                            <Copy className="w-3.5 h-3.5" />
+                            <Copy className="size-3.5" />
                           </button>
                         </>
                       )}
                     </div>
-                    <div className="w-28 shrink-0 font-mono text-xs tabular-nums text-zinc-500">{formatBytes(file.fsize)}</div>
-                    <div className="w-52 shrink-0 hidden md:block">
-                      <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-2 py-0.5 rounded text-xs">{file.mimeType || 'unknown'}</span>
-                    </div>
-                    <div className="w-44 shrink-0 hidden lg:block text-zinc-400 text-xs tabular-nums">{formatQiniuTime(file.putTime)}</div>
-                    <div className="w-44 shrink-0 pr-5">
-                      <div className="flex items-center justify-end gap-1">
-                        <button onClick={(e) => startRename(e, file)}
-                          className="p-1.5 text-zinc-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded opacity-0 group-hover:opacity-100 transition-all" title="重命名">
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); handleDownload(file.key); }}
-                          className="p-1.5 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded opacity-0 group-hover:opacity-100 transition-all" title="下载文件">
-                          <Download className="w-4 h-4" />
-                        </button>
-                        <button onClick={(e) => handleCopyLink(e, file.key)}
-                          className={`text-xs font-medium px-2 py-1.5 rounded-md transition-all flex items-center gap-1 whitespace-nowrap shrink-0
-                            ${copiedKey === file.key
-                              ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
-                              : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 opacity-0 group-hover:opacity-100'}`}>
-                          {copiedKey === file.key ? <><Check className="w-3 h-3" />已复制</> : <><Link2 className="w-3 h-3" />复制链接</>}
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); setFileToDelete(file.key); }}
-                          className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded opacity-0 group-hover:opacity-100 transition-all" title="删除文件">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                    <div className="w-28 shrink-0 font-mono text-xs tabular-nums text-zinc-500 dark:text-zinc-400">{formatBytes(file.fsize)}</div>
+                    <div className="hidden w-52 shrink-0 truncate text-xs text-zinc-500 md:block dark:text-zinc-400">{file.mimeType || "—"}</div>
+                    <div className="hidden w-44 shrink-0 font-mono text-xs tabular-nums text-zinc-500 lg:block dark:text-zinc-400">{formatQiniuTime(file.putTime)}</div>
+                    <div className="w-36 shrink-0 pr-5">
+                      <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                        <Button type="button" variant="ghost" size="icon-xs" title="重命名" aria-label="重命名" className="text-zinc-400" onClick={(e) => startRename(e, file)}>
+                          <Pencil />
+                        </Button>
+                        <Button type="button" variant="ghost" size="icon-xs" title="下载文件" aria-label="下载文件" className="text-zinc-400" onClick={(e) => { e.stopPropagation(); handleDownload(file.key); }}>
+                          <Download />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          title={copiedKey === file.key ? "已复制" : "复制链接"}
+                          aria-label="复制链接"
+                          className={copiedKey === file.key ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"}
+                          onClick={(e) => handleCopyLink(e, file.key)}
+                        >
+                          {copiedKey === file.key ? <Check /> : <Link2 />}
+                        </Button>
+                        <Button type="button" variant="ghost" size="icon-xs" title="删除文件" aria-label="删除文件" className="text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/40 dark:hover:text-red-400" onClick={(e) => { e.stopPropagation(); setFileToDelete(file.key); }}>
+                          <Trash2 />
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -1866,41 +1887,75 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
       {/* ── Bookmark Dialog ── */}
       {showBookmarkDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-zinc-900 w-full max-w-sm rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 p-6 mx-4">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                <Bookmark className="w-5 h-5 text-amber-500" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-zinc-800 dark:text-zinc-100">添加书签</h3>
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">{bucket}{currentPrefix ? " / " + currentPrefix.replace(/\/$/, "") : ""}</p>
-              </div>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={isEditingBookmark ? handleBookmarkDone : handleBookmarkCancel}
+        >
+          <div
+            className="mx-4 w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 className="mb-4 text-base font-bold text-zinc-800 dark:text-zinc-100">
+              {isEditingBookmark ? "修改书签" : "添加书签"}
+            </h3>
+            <label className="mb-1.5 block text-xs font-medium text-zinc-500 dark:text-zinc-400">名称</label>
+            <div className="relative mb-3">
+              <input
+                autoFocus
+                type="text"
+                value={bookmarkLabel}
+                onChange={e => setBookmarkLabel(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") handleBookmarkDone();
+                  if (e.key === "Escape") {
+                    if (isEditingBookmark) handleBookmarkDone();
+                    else handleBookmarkCancel();
+                  }
+                }}
+                placeholder="书签名称"
+                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-2 pl-3 pr-8 text-sm text-zinc-800 placeholder:text-zinc-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-600"
+              />
+              {bookmarkLabel && (
+                <button
+                  type="button"
+                  onClick={() => setBookmarkLabel("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-zinc-400 transition-colors hover:bg-zinc-200 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                  aria-label="清除名称"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
             </div>
-            <input
-              autoFocus
-              type="text"
-              value={bookmarkLabel}
-              onChange={e => setBookmarkLabel(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') handleAddBookmark();
-                if (e.key === 'Escape') { setShowBookmarkDialog(false); setBookmarkLabel(""); }
-              }}
-              placeholder="书签名称（如：产品图片库）"
-              className="w-full px-3 py-2 text-sm text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 mb-5"
-            />
+            <p
+              className="mb-5 min-w-0 break-all font-mono text-xs text-zinc-400 dark:text-zinc-500"
+              title={`${bucket}${currentPrefix ? "/" + currentPrefix.replace(/\/$/, "") : ""}`}
+            >
+              {bucket}{currentPrefix ? "/" + currentPrefix.replace(/\/$/, "") : ""}
+            </p>
             <div className="flex gap-2">
+              {isEditingBookmark ? (
+                <button
+                  type="button"
+                  onClick={handleBookmarkRemove}
+                  className="flex-1 rounded-xl bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                >
+                  移除
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleBookmarkCancel}
+                  className="flex-1 rounded-xl bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                >
+                  取消
+                </button>
+              )}
               <button
-                onClick={() => { setShowBookmarkDialog(false); setBookmarkLabel(""); }}
-                className="flex-1 px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl transition-colors"
+                type="button"
+                onClick={handleBookmarkDone}
+                className="flex-1 rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-600"
               >
-                取消
-              </button>
-              <button
-                onClick={handleAddBookmark}
-                className="flex-1 px-4 py-2 text-sm font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-xl transition-colors"
-              >
-                确认添加
+                完成
               </button>
             </div>
           </div>

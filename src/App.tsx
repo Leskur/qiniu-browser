@@ -194,9 +194,9 @@ function App() {
   const navItems: { id: Section; label: string; icon: typeof Database; desc: string; cdnSection?: CdnSubSection }[] = [
     { id: "storage", label: "空间管理", icon: Database, desc: "对象存储 · 文件" },
     { id: "bookmarks", label: "书签管理", icon: Bookmark, desc: "快速访问 · 常用路径" },
-    { id: "cdn", label: "刷新预取", icon: Zap, desc: "缓存刷新 · 文件预取", cdnSection: "refresh" },
     { id: "cdn", label: "域名管理", icon: Globe, desc: "加速域名 · 配置详情", cdnSection: "domains" },
-    { id: "settings",label: "设置",    icon: Settings,  desc: "外观 · 偏好" },
+    { id: "cdn", label: "刷新预取", icon: Zap, desc: "缓存刷新 · 文件预取", cdnSection: "refresh" },
+    { id: "settings", label: "设置", icon: Settings, desc: "外观 · 偏好" },
   ];
 
   return (

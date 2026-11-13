@@ -2,10 +2,11 @@ import { useState, useMemo, useEffect } from "react";
 import { createBucket, forceDeleteBucket } from "../../lib/qiniu";
 import { useAppStore } from "../../store";
 import { toast } from "@/lib/toast";
+import { formatBytes } from "../../lib/utils";
 import { SortField, formatRegion } from "./constants";
-import { BucketListHeader } from "./BucketListHeader";
 import { RegionFilterSelect, SearchInput } from "./Toolbar";
 import { Plus, RefreshCw } from "lucide-react";
+import { Button } from "../../components/ui/button";
 import { LoadingOverlay } from "../../components/LoadingOverlay";
 import { BucketTable } from "./BucketTable";
 import { CreateBucketDialog } from "./CreateBucketDialog";
@@ -71,10 +72,10 @@ export function BucketList({
         let valA = a[sortField];
         let valB = b[sortField];
 
-        if (typeof valA === 'string' && typeof valB === 'string') {
+        if (typeof valA === "string" && typeof valB === "string") {
           return sortDesc ? valB.localeCompare(valA) : valA.localeCompare(valB);
         }
-        if (typeof valA === 'number' && typeof valB === 'number') {
+        if (typeof valA === "number" && typeof valB === "number") {
           return sortDesc ? valB - valA : valA - valB;
         }
         return 0;
@@ -145,26 +146,30 @@ export function BucketList({
   return (
     <div className="flex-1 flex flex-col min-h-0 relative h-full">
       {!loading && !error && (
-        <BucketListHeader stats={stats} />
-      )}
-
-      {!loading && !error && (
         <div className="flex h-12 items-center gap-2 px-6 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
-          <button
-            onClick={() => setShowCreateDialog(true)}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-all shadow-sm active:scale-95 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" /> 新建空间
-          </button>
-          <button
-            onClick={handleRefresh}
+          <Button onClick={() => setShowCreateDialog(true)}>
+            <Plus /> 新建空间
+          </Button>
+          <Button
+            variant="ghost"
             disabled={refreshing}
-            className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 px-3 py-1.5 rounded-lg text-sm font-medium transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+            onClick={handleRefresh}
             title="刷新列表"
           >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={refreshing ? "animate-spin" : undefined} />
             刷新
-          </button>
+          </Button>
+
+          {stats.totalBuckets > 0 && (
+            <p className="hidden min-w-0 truncate text-xs text-zinc-400 dark:text-zinc-500 sm:block">
+              {stats.totalBuckets} 空间
+              <span className="mx-1.5 text-zinc-300 dark:text-zinc-700">·</span>
+              {stats.totalFiles.toLocaleString()} 文件
+              <span className="mx-1.5 text-zinc-300 dark:text-zinc-700">·</span>
+              {formatBytes(stats.totalSize)}
+            </p>
+          )}
+
           <div className="flex-1" />
           <RegionFilterSelect
             regions={regions}
@@ -179,7 +184,7 @@ export function BucketList({
         </div>
       )}
 
-      <div className="relative flex-1 flex flex-col min-h-0 p-4 pt-3">
+      <div className="relative flex min-h-0 flex-1 flex-col">
         <BucketTable
           buckets={processedBuckets}
           stats={stats}
@@ -191,6 +196,7 @@ export function BucketList({
           deletingBucket={deletingBucket}
           onSelectBucket={onSelectBucket}
           onDeleteBucket={(name: string) => { setBucketToDelete(name); setDeleteConfirmInput(""); }}
+          onCreateBucket={() => setShowCreateDialog(true)}
           onSort={handleSort}
           formatRegion={formatRegion}
         />

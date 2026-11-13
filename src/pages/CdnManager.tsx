@@ -282,12 +282,6 @@ export function CdnManager({
 
   return (
     <div className="h-full flex flex-col bg-white dark:bg-zinc-950">
-      {/* Header */}
-      <div className="flex h-14 items-center gap-3 px-6 border-b border-zinc-200 dark:border-zinc-800 shrink-0 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm z-20 relative">
-        <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-200">刷新预取</h2>
-      </div>
-
-      {/* Content */}
       <div className="flex-1 overflow-y-auto p-6">
         <Tabs
           value={subTab}
@@ -322,7 +316,7 @@ export function CdnManager({
 
               <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="record-operation" className="shrink-0">操作类型</Label>
+                  <Label htmlFor="record-operation" className="shrink-0 text-xs font-normal text-muted-foreground">操作类型</Label>
                   <Select
                     items={OPERATION_ITEMS}
                     value={filters.operation}
@@ -341,7 +335,7 @@ export function CdnManager({
                   </Select>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="record-date" className="shrink-0">提交时间</Label>
+                  <Label htmlFor="record-date" className="shrink-0 text-xs font-normal text-muted-foreground">提交时间</Label>
                   <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                     <PopoverTrigger render={<Button id="record-date" variant="outline" />}>
                       <CalendarIcon />
