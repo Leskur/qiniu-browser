@@ -1,537 +1,210 @@
-import { useState, useEffect, useMemo } from "react";
-import { toast } from "sonner";
-import { fetchCdnDomains, CdnDomain } from "../lib/qiniu";
-import { RefreshCw, Globe, Copy, Check, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Search, X, Zap, Info, Calendar, Server } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "@/lib/toast";
+import { CdnDomain, fetchCdnDomain, fetchCdnDomains, onlineCdnDomain, offlineCdnDomain, deleteCdnDomain } from "../lib/qiniu";
+import { Copy, ExternalLink, Loader2, RefreshCw, Search } from "lucide-react";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Badge } from "../components/ui/badge";
+import { Label } from "../components/ui/label";
 import { Skeleton } from "../components/ui/skeleton";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../components/ui/table";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 
-type SortField = 'name' | 'status' | 'protocol' | 'geoCover';
-type SortDirection = 'asc' | 'desc';
+type Action = "online" | "offline" | "delete";
+type SortField = "name" | "operatingState" | "protocol" | "geoCover";
+const actionNames: Record<Action, string> = { online: "上线", offline: "下线", delete: "删除" };
+const statusItems = [{ value: "all", label: "全部状态" }, { value: "online", label: "在线" }, { value: "offline", label: "离线" }, { value: "processing", label: "配置中" }, { value: "failed", label: "失败" }];
+const regionItems = [{ value: "all", label: "全部区域" }, { value: "china", label: "中国大陆" }, { value: "foreign", label: "海外" }, { value: "global", label: "全球" }];
+function status(state: string) {
+  if (state === "success") return "online";
+  if (["offline", "offlined"].includes(state)) return "offline";
+  if (["failed", "failure"].includes(state)) return "failed";
+  return state;
+}
+function StatusBadge({ state }: { state: string }) {
+  const value = status(state);
+  return <Badge variant={value === "failed" ? "destructive" : value === "online" ? "secondary" : "outline"}>{statusItems.find(item => item.value === value)?.label ?? (state || "未知")}</Badge>;
+}
+function region(value: string) {
+  return value === "overseas" ? "foreign" : value;
+}
+function regionLabel(value: string) {
+  return regionItems.find(item => item.value === region(value))?.label ?? (value || "-");
+}
+function isWildcard(value: string) { return value === "wildcard" || value === "pan"; }
+function formatTime(value?: string | number) {
+  if (!value) return "-";
+  const date = new Date(typeof value === "number" ? value * 1000 : value.replace(" ", "T"));
+  return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString("zh-CN", { hour12: false });
+}
+function FilterSelect({ label, value, items, onChange }: { label: string; value: string; items: { value: string; label: string }[]; onChange: (value: string) => void }) {
+  return <Select items={items} value={value} onValueChange={value => { if (value !== null) onChange(value); }}>
+    <SelectTrigger aria-label={label} className="w-32"><SelectValue /></SelectTrigger>
+    <SelectContent>{items.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+  </Select>;
+}
+function InfoRows({ rows }: { rows: [string, string][] }) {
+  return <dl className="divide-y rounded-lg border px-4">{rows.map(([label, value]) => <div key={label} className="grid grid-cols-[6rem_1fr] gap-3 py-3 text-sm"><dt className="text-muted-foreground">{label}</dt><dd className="min-w-0 break-all">{value || "-"}</dd></div>)}</dl>;
+}
 
-export function DomainManager({ 
-  ak, 
-  sk,
-  selectedDomain,
-  onSelectDomain,
-  onRefreshDomain,
-  refreshTrigger
-}: { 
-  ak: string; 
-  sk: string;
-  selectedDomain: string | null;
+export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefreshDomain, refreshTrigger }: {
+  ak: string; sk: string; selectedDomain: string | null;
   onSelectDomain: (domain: string | null) => void;
-  onRefreshDomain: (domain: string) => void;
-  refreshTrigger?: number;
+  onRefreshDomain: (domain: string) => void; refreshTrigger?: number;
 }) {
   const [domains, setDomains] = useState<CdnDomain[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [copiedCname, setCopiedCname] = useState<string | null>(null);
-  const [sortField, setSortField] = useState<SortField>('name');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  const [searchQuery, setSearchQuery] = useState("");
+  const [listError, setListError] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [regionFilter, setRegionFilter] = useState("all");
+  const [descending, setDescending] = useState(false);
+  const [sortField, setSortField] = useState<SortField>("name");
+  const listRequest = useRef(0);
+  const [detail, setDetail] = useState<CdnDomain | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [detailVersion, setDetailVersion] = useState(0);
+  const [pending, setPending] = useState<Action | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const loadDomains = async (showLoading = true) => {
-    if (showLoading) setLoading(true);
+  const loadDomains = useCallback(async () => {
+    const version = ++listRequest.current;
+    setLoading(true); setListError("");
     try {
-      // 获取所有域名（处理分页）
-      let allDomains: CdnDomain[] = [];
+      const result: CdnDomain[] = [];
+      const markers = new Set<string>();
       let marker = "";
-      
       do {
-        const result = await fetchCdnDomains(ak, sk, marker, 100);
-        allDomains = [...allDomains, ...result.domains];
-        marker = result.marker;
+        const page = await fetchCdnDomains(ak, sk, marker, 100);
+        if (version !== listRequest.current) return;
+        result.push(...(page.domains || []));
+        marker = page.marker || "";
+        if (marker && markers.has(marker)) throw new Error("域名列表分页异常，请重试");
+        markers.add(marker);
       } while (marker);
-
-      setDomains(allDomains);
-    } catch (err: any) {
-      toast.error("加载域名列表失败", { description: err.message });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadDomains();
+      setDomains(result);
+    } catch (error) {
+      if (version === listRequest.current) setListError(error instanceof Error ? error.message : String(error));
+    } finally { if (version === listRequest.current) setLoading(false); }
   }, [ak, sk]);
 
-  // ── F5 刷新触发 ──
   useEffect(() => {
-    if (refreshTrigger !== undefined && refreshTrigger > 0) {
-      handleRefresh();
-    }
+    setDomains([]); onSelectDomain(null);
+    loadDomains();
+    return () => { listRequest.current++; };
+  }, [loadDomains]);
+  useEffect(() => {
+    if (refreshTrigger !== undefined && refreshTrigger > 0) { loadDomains(); setDetailVersion(value => value + 1); }
   }, [refreshTrigger]);
+  useEffect(() => {
+    let cancelled = false;
+    setDetail(null); setDetailError(""); setConfirmOpen(false); setConfirmation("");
+    if (!selectedDomain) { setDetailLoading(false); return; }
+    setDetailLoading(true);
+    fetchCdnDomain(ak, sk, selectedDomain).then(data => { if (!cancelled) setDetail(data); })
+      .catch(error => { if (!cancelled) setDetailError(error instanceof Error ? error.message : String(error)); })
+      .finally(() => { if (!cancelled) setDetailLoading(false); });
+    return () => { cancelled = true; };
+  }, [ak, sk, selectedDomain, detailVersion]);
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await loadDomains(false);
-    setRefreshing(false);
-    toast.success("刷新成功");
+  const visibleDomains = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return domains.filter(domain => (!query || `${domain.name} ${domain.cname || ""}`.toLowerCase().includes(query))
+      && (statusFilter === "all" || status(domain.operatingState) === statusFilter)
+      && (regionFilter === "all" || region(domain.geoCover) === regionFilter))
+      .sort((a, b) => (a[sortField] || "").localeCompare(b[sortField] || "") * (descending ? -1 : 1));
+  }, [domains, search, statusFilter, regionFilter, descending, sortField]);
+
+  const sortHeader = (field: SortField, label: string) => <TableHead aria-sort={sortField === field ? descending ? "descending" : "ascending" : "none"}>
+    <Button variant="ghost" size="sm" onClick={() => {
+      if (sortField === field) setDescending(value => !value);
+      else { setSortField(field); setDescending(false); }
+    }} aria-label={`按${label}排序`}>{label} {sortField === field ? descending ? "↓" : "↑" : "↕"}</Button>
+  </TableHead>;
+
+  const copy = async (value: string, label: string) => {
+    try { await navigator.clipboard.writeText(value); toast.success(`已复制${label}`); }
+    catch { toast.error("复制失败，请重试"); }
   };
-
-  const handleCopyCname = (cname: string) => {
-    navigator.clipboard.writeText(cname).then(() => {
-      setCopiedCname(cname);
-      setTimeout(() => setCopiedCname(null), 2000);
-    }).catch(() => {
-      toast.error("复制失败");
-    });
-  };
-
-  const getStatusBadge = (state: string) => {
-    switch (state) {
-      case "success":
-        return <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">在线</span>;
-      case "offline":
-        return <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">离线</span>;
-      case "processing":
-        return <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">配置中</span>;
-      case "failed":
-        return <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">失败</span>;
-      default:
-        return <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">{state}</span>;
-    }
-  };
-
-  const getGeoCoverText = (geoCover: string) => {
-    switch (geoCover) {
-      case "china": return "国内";
-      case "overseas": return "海外";
-      case "global": return "全球";
-      default: return geoCover;
-    }
-  };
-
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  };
-
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) {
-      return <ArrowUpDown className="w-3 h-3 ml-1 opacity-40" />;
-    }
-    return sortDirection === 'asc' 
-      ? <ArrowUp className="w-3 h-3 ml-1" /> 
-      : <ArrowDown className="w-3 h-3 ml-1" />;
-  };
-
-  const sortedDomains = useMemo(() => {
-    return [...domains].sort((a, b) => {
-      let comparison = 0;
-      
-      switch (sortField) {
-        case 'name':
-          comparison = a.name.localeCompare(b.name);
-          break;
-        case 'status':
-          comparison = a.operatingState.localeCompare(b.operatingState);
-          break;
-        case 'protocol':
-          comparison = a.protocol.localeCompare(b.protocol);
-          break;
-        case 'geoCover':
-          comparison = a.geoCover.localeCompare(b.geoCover);
-          break;
-      }
-      
-      return sortDirection === 'asc' ? comparison : -comparison;
-    });
-  }, [domains, sortField, sortDirection]);
-
-  const filteredDomains = useMemo(() => {
-    if (!searchQuery.trim()) return sortedDomains;
-    
-    const query = searchQuery.toLowerCase();
-    return sortedDomains.filter(domain => 
-      domain.name.toLowerCase().includes(query) ||
-      domain.cname.toLowerCase().includes(query) ||
-      domain.operatingState.toLowerCase().includes(query)
-    );
-  }, [sortedDomains, searchQuery]);
-
-  const selectedDomainData = useMemo(() => {
-    return domains.find(d => d.name === selectedDomain);
-  }, [domains, selectedDomain]);
-
-  const formatDate = (timestamp?: number | string) => {
-    if (!timestamp) return "未知";
+  const executeAction = async () => {
+    if (!pending || !detail || busy || (pending === "delete" && confirmation !== detail.name)) return;
+    const action = pending, name = detail.name;
+    setBusy(true);
     try {
-      // 如果是字符串，尝试解析
-      const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp * 1000);
-      if (isNaN(date.getTime())) return "未知";
-      return date.toLocaleString('zh-CN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      });
-    } catch {
-      return "未知";
-    }
+      const invoke = { online: onlineCdnDomain, offline: offlineCdnDomain, delete: deleteCdnDomain }[action];
+      await invoke(ak, sk, name);
+      toast.success(action === "delete" ? "域名已删除" : `${actionNames[action]}请求已提交`);
+      setConfirmOpen(false); setConfirmation("");
+      if (action === "delete") onSelectDomain(null);
+      else setDetailVersion(value => value + 1);
+      await loadDomains();
+    } catch (error) { toast.error(`${actionNames[action]}失败`, { description: error instanceof Error ? error.message : String(error) }); }
+    finally { setBusy(false); }
   };
 
-  return (
-    <div className="h-full flex flex-col bg-white dark:bg-zinc-950">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3.5 border-b border-zinc-200 dark:border-zinc-800 shrink-0 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm z-20">
-        <div className="flex items-center gap-3">
-          <Globe className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-          <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-200">域名管理</h2>
-          {!loading && (
-            <span className="text-xs text-zinc-400">
-              {searchQuery ? `${filteredDomains.length} / ${domains.length}` : `共 ${domains.length} 个域名`}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索域名或 CNAME..."
-              className="pl-9 pr-8 py-1.5 text-sm bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-zinc-700 dark:text-zinc-200 placeholder:text-zinc-400 w-64"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-            刷新
-          </button>
-        </div>
+  return <div className="flex h-full flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-3 px-6 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-200">域名管理</h2>
+        <span className="text-xs text-zinc-400 dark:text-zinc-500 tabular-nums bg-zinc-50 dark:bg-zinc-800/50 px-1.5 py-0.5 rounded border border-zinc-200/50 dark:border-zinc-700/50">
+          共 {domains.length} 个
+        </span>
       </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        {loading ? (
-          <div className="p-6 space-y-3">
-            {[1, 2, 3, 4].map(i => (
-              <div key={i} className="flex items-center gap-4 p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg">
-                <Skeleton className="h-4 w-48" />
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-4 w-24" />
-              </div>
-            ))}
-          </div>
-        ) : domains.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <Globe className="w-16 h-16 text-zinc-300 dark:text-zinc-700 mb-4" />
-            <p className="text-zinc-500 dark:text-zinc-400 mb-2">暂无 CDN 域名</p>
-            <p className="text-sm text-zinc-400 dark:text-zinc-500">
-              请前往七牛云控制台添加 CDN 加速域名
-            </p>
-          </div>
-        ) : (
-          <div className="h-full overflow-auto">
-            <table className="w-full">
-              <thead className="bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700 sticky top-0 z-10">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                    <button
-                      onClick={() => handleSort('name')}
-                      className="flex items-center hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
-                    >
-                      域名
-                      <SortIcon field="name" />
-                    </button>
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap w-24">
-                    <button
-                      onClick={() => handleSort('status')}
-                      className="flex items-center hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
-                    >
-                      状态
-                      <SortIcon field="status" />
-                    </button>
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap w-20">
-                    <button
-                      onClick={() => handleSort('protocol')}
-                      className="flex items-center hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
-                    >
-                      协议
-                      <SortIcon field="protocol" />
-                    </button>
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap w-24">
-                    <button
-                      onClick={() => handleSort('geoCover')}
-                      className="flex items-center hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
-                    >
-                      加速区域
-                      <SortIcon field="geoCover" />
-                    </button>
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap">CNAME</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap w-24">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800 bg-white dark:bg-zinc-950">
-                {filteredDomains.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center">
-                      <div className="flex flex-col items-center justify-center text-zinc-400 dark:text-zinc-500">
-                        <Search className="w-12 h-12 mb-3 opacity-50" />
-                        <p className="text-sm">没有找到匹配的域名</p>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredDomains.map(domain => (
-                    <tr key={domain.name} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => onSelectDomain(domain.name)}
-                          className="text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:underline text-left"
-                        >
-                          {domain.name}
-                        </button>
-                        {domain.type === "pan" && (
-                          <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 whitespace-nowrap">
-                            泛域名
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 w-24">
-                      {getStatusBadge(domain.operatingState)}
-                    </td>
-                    <td className="px-4 py-3 w-20">
-                      <span className={`text-xs font-medium whitespace-nowrap ${domain.protocol === 'https' ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'}`}>
-                        {domain.protocol.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 w-24">
-                      <span className="text-sm text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
-                        {getGeoCoverText(domain.geoCover)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <code className="text-xs font-mono text-zinc-600 dark:text-zinc-400">
-                        {domain.cname}
-                      </code>
-                    </td>
-                    <td className="px-4 py-3 w-24">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => onRefreshDomain(domain.name)}
-                          className="p-1.5 text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
-                          title="刷新该域名"
-                        >
-                          <Zap className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleCopyCname(domain.cname)}
-                          className="p-1.5 text-zinc-500 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded transition-colors"
-                          title="复制 CNAME"
-                        >
-                          {copiedCname === domain.cname ? (
-                            <Check className="w-4 h-4 text-emerald-600" />
-                          ) : (
-                            <Copy className="w-4 h-4" />
-                          )}
-                        </button>
-                        <a
-                          href={`${domain.protocol}://${domain.name}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-1.5 text-zinc-500 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded transition-colors"
-                          title="访问域名"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </a>
-                      </div>
-                    </td>
-                  </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Domain Detail Panel */}
-      {selectedDomainData && (
-        <>
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-30"
-            onClick={() => onSelectDomain(null)}
-          />
-          
-          {/* Panel */}
-          <div className="fixed right-0 top-0 bottom-0 w-[480px] bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl z-40 flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
-              <div className="flex items-center gap-3">
-                <Globe className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">域名详情</h3>
-              </div>
-              <button
-                onClick={() => onSelectDomain(null)}
-                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              {/* Domain Name */}
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <h4 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-                    {selectedDomainData.name}
-                  </h4>
-                  {selectedDomainData.type === "pan" && (
-                    <span className="px-2 py-0.5 text-xs font-medium rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400">
-                      泛域名
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {getStatusBadge(selectedDomainData.operatingState)}
-                  <span className="text-xs text-zinc-400">·</span>
-                  <span className={`text-xs font-medium ${selectedDomainData.protocol === 'https' ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'}`}>
-                    {selectedDomainData.protocol.toUpperCase()}
-                  </span>
-                </div>
-              </div>
-
-              {/* Quick Actions */}
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => {
-                    onRefreshDomain(selectedDomainData.name);
-                    onSelectDomain(null);
-                  }}
-                  className="flex items-center justify-center gap-2 px-4 py-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors font-medium text-sm"
-                >
-                  <Zap className="w-4 h-4" />
-                  刷新缓存
-                </button>
-                <a
-                  href={`${selectedDomainData.protocol}://${selectedDomainData.name}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 px-4 py-3 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-lg transition-colors font-medium text-sm"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  访问域名
-                </a>
-              </div>
-
-              {/* Basic Info */}
-              <div className="space-y-4">
-                <h5 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
-                  <Info className="w-4 h-4" />
-                  基本信息
-                </h5>
-                
-                <div className="space-y-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg p-4">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">加速区域</span>
-                    <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                      {getGeoCoverText(selectedDomainData.geoCover)}
-                    </span>
-                  </div>
-                  
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">域名类型</span>
-                    <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                      {selectedDomainData.type === "pan" ? "泛域名" : "普通域名"}
-                    </span>
-                  </div>
-
-                  {selectedDomainData.createAt && (
-                    <div className="flex justify-between items-start">
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
-                        创建时间
-                      </span>
-                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                        {formatDate(selectedDomainData.createAt)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* CNAME Configuration */}
-              <div className="space-y-4">
-                <h5 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
-                  <Server className="w-4 h-4" />
-                  CNAME 配置
-                </h5>
-                
-                <div className="bg-zinc-50 dark:bg-zinc-800/50 rounded-lg p-4 space-y-3">
-                  <div>
-                    <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-2 block">CNAME 记录值</label>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300 break-all">
-                        {selectedDomainData.cname}
-                      </code>
-                      <button
-                        onClick={() => handleCopyCname(selectedDomainData.cname)}
-                        className="p-2 text-zinc-500 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded transition-colors shrink-0"
-                        title="复制"
-                      >
-                        {copiedCname === selectedDomainData.cname ? (
-                          <Check className="w-4 h-4 text-emerald-600" />
-                        ) : (
-                          <Copy className="w-4 h-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 pt-2 border-t border-zinc-200 dark:border-zinc-700">
-                    <p className="font-medium">配置步骤：</p>
-                    <ol className="list-decimal list-inside space-y-1 pl-2">
-                      <li>登录您的域名服务商管理后台</li>
-                      <li>添加 CNAME 记录，指向上方的记录值</li>
-                      <li>等待 DNS 解析生效（通常 10 分钟内）</li>
-                    </ol>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 shrink-0">
-              <button
-                onClick={() => onSelectDomain(null)}
-                className="w-full px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg transition-colors font-medium text-sm"
-              >
-                关闭
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+      <Button variant="outline" size="default" disabled={loading} onClick={() => { loadDomains(); setDetailVersion(value => value + 1); }}><RefreshCw className={loading ? "animate-spin" : ""} />刷新</Button>
+    </header>
+    <div className="flex h-12 flex-wrap items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 px-6 shrink-0">
+      <div className="relative min-w-48 flex-1 sm:max-w-sm"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="搜索域名或 CNAME" placeholder="搜索域名或 CNAME" value={search} onChange={event => setSearch(event.target.value)} className="pl-9" /></div>
+      <FilterSelect label="域名状态" value={statusFilter} items={statusItems} onChange={setStatusFilter} />
+      <FilterSelect label="加速区域" value={regionFilter} items={regionItems} onChange={setRegionFilter} />
+      <span className="text-xs text-zinc-400 dark:text-zinc-500">{visibleDomains.length} 个匹配</span>
     </div>
-  );
+    <div className="min-h-0 flex-1 overflow-auto p-6">
+      {listError && <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 p-3 text-sm text-destructive"><span>加载失败：{listError}</span><Button variant="outline" size="sm" onClick={loadDomains}>重试</Button></div>}
+      {loading && domains.length === 0 ? <div aria-label="正在加载域名" className="space-y-3">{[0, 1, 2, 3].map(value => <Skeleton key={value} className="h-12 w-full" />)}</div> :
+        <div className="overflow-hidden rounded-lg border"><Table>
+          <TableHeader><TableRow>
+            {sortHeader("name", "域名")}{sortHeader("operatingState", "状态")}{sortHeader("protocol", "协议")}{sortHeader("geoCover", "加速区域")}<TableHead>CNAME</TableHead><TableHead className="text-right">操作</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>{visibleDomains.length === 0 ? <TableRow><TableCell colSpan={6} className="h-40 text-center text-muted-foreground">{listError ? "未能获取域名" : domains.length ? "没有匹配的域名" : "暂无 CDN 域名"}</TableCell></TableRow> : visibleDomains.map(domain => <TableRow key={domain.name}>
+            <TableCell><div className="flex items-center gap-2"><Button variant="link" className="h-auto p-0" onClick={() => onSelectDomain(domain.name)}>{domain.name}</Button>{isWildcard(domain.type) && <Badge variant="outline">泛域名</Badge>}</div></TableCell>
+            <TableCell><StatusBadge state={domain.operatingState} /></TableCell><TableCell>{domain.protocol?.toUpperCase() || "-"}</TableCell><TableCell>{regionLabel(domain.geoCover)}</TableCell>
+            <TableCell><div className="flex items-center gap-1"><code className="text-xs">{domain.cname || "-"}</code><Button variant="ghost" size="icon-xs" disabled={!domain.cname} aria-label={`复制 ${domain.name} 的 CNAME`} onClick={() => copy(domain.cname, " CNAME")}><Copy /></Button></div></TableCell>
+            <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => onSelectDomain(domain.name)}>详情</Button></TableCell>
+          </TableRow>)}</TableBody>
+        </Table></div>}
+    </div>
+    <Sheet open={!!selectedDomain} onOpenChange={open => { if (!open && !busy) onSelectDomain(null); }}>
+      <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-xl" showCloseButton={!busy}>
+        <SheetHeader className="border-b pr-12"><SheetTitle>域名详情</SheetTitle><SheetDescription className="break-all">{selectedDomain}</SheetDescription></SheetHeader>
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 pb-6">
+          {detailLoading ? <div className="space-y-3" aria-label="正在加载域名详情"><Skeleton className="h-10 w-full" /><Skeleton className="h-48 w-full" /></div> : detailError ? <div role="alert" className="space-y-3 text-sm text-destructive"><p>加载详情失败：{detailError}</p><Button variant="outline" onClick={() => setDetailVersion(value => value + 1)}>重试</Button></div> : detail && <>
+            <div className="flex items-center gap-2"><StatusBadge state={detail.operatingState} /><Badge variant="outline">{isWildcard(detail.type) ? "泛域名" : "普通域名"}</Badge></div>
+            {detail.operatingStateDesc && <p className="text-sm text-muted-foreground">{detail.operatingStateDesc}</p>}
+            <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => copy(detail.name, "域名")}><Copy />复制域名</Button><Button variant="outline" size="sm" onClick={() => { onSelectDomain(null); onRefreshDomain(detail.name); }}>刷新缓存</Button>{!isWildcard(detail.type) && <Button variant="outline" size="sm" nativeButton={false} render={<a href={`${detail.protocol === "https" ? "https" : "http"}://${detail.name}`} target="_blank" rel="noopener noreferrer" />}><ExternalLink />访问域名</Button>}</div>
+            <section className="space-y-3"><h3 className="font-medium">基本信息</h3><InfoRows rows={[["协议", detail.protocol?.toUpperCase() || "-"], ["加速区域", regionLabel(detail.geoCover)], ["业务类型", ({ web: "静态网站", download: "文件下载", vod: "音视频点播", dynamic: "动态加速" } as Record<string, string>)[detail.platform] || detail.platform], ["备案号", detail.registerNo || "-"], ["创建时间", formatTime(detail.createAt)], ["更新时间", formatTime(detail.modifyAt)]]} /></section>
+            <section className="space-y-3"><h3 className="font-medium">CNAME</h3><div className="flex items-center gap-2 rounded-lg border p-3"><code className="min-w-0 flex-1 break-all text-xs">{detail.cname || "尚未分配"}</code><Button variant="ghost" size="icon-sm" disabled={!detail.cname} aria-label="复制 CNAME" onClick={() => copy(detail.cname, " CNAME")}><Copy /></Button></div><p className="text-xs text-muted-foreground">在域名服务商处添加 CNAME 记录，指向上述地址。</p></section>
+            <section className="space-y-3"><h3 className="font-medium">源站配置</h3><InfoRows rows={[["源站类型", ({ qiniuBucket: "七牛存储空间", domain: "源站域名", ip: "源站 IP", advanced: "高级源站" } as Record<string, string>)[detail.source?.sourceType || ""] || detail.source?.sourceType || "-"], ["源站地址", detail.source?.sourceQiniuBucket || detail.source?.sourceDomain || detail.source?.sourceIPs?.join("、") || "-"], ["回源 Host", detail.source?.sourceHost || "-"]]} /></section>
+            <section className="space-y-3"><h3 className="font-medium">HTTPS</h3><InfoRows rows={[["HTTPS", detail.protocol === "https" ? "已开启" : "未开启"], ["证书 ID", detail.https?.certId || "-"], ["强制 HTTPS", detail.https?.forceHttps === undefined ? "-" : detail.https.forceHttps ? "已开启" : "未开启"], ["HTTP/2", detail.https?.http2Enable === undefined ? "-" : detail.https.http2Enable ? "已开启" : "未开启"]]} /></section>
+            <section className="space-y-3 border-t pt-4"><h3 className="font-medium">域名操作</h3><div className="flex flex-wrap gap-2">
+              <Button variant="outline" disabled={busy || status(detail.operatingState) !== "offline"} onClick={() => { setPending("online"); setConfirmOpen(true); }}>上线域名</Button>
+              <Button variant="outline" disabled={busy || status(detail.operatingState) !== "online"} onClick={() => { setPending("offline"); setConfirmOpen(true); }}>下线域名</Button>
+              <Button variant="destructive" disabled={busy || status(detail.operatingState) !== "offline"} onClick={() => { setPending("delete"); setConfirmation(""); setConfirmOpen(true); }}>删除域名</Button>
+            </div><p className="text-xs text-muted-foreground">下线会停止 CDN 加速服务。删除前需先下线域名。</p></section>
+          </>}
+        </div>
+        <Dialog open={confirmOpen} onOpenChange={open => { if (!busy) { setConfirmOpen(open); if (!open) setConfirmation(""); } }}>
+          <DialogContent showCloseButton={!busy}>
+            <DialogHeader><DialogTitle>{pending ? actionNames[pending] : ""}域名</DialogTitle><DialogDescription className="break-all">{pending === "delete" ? "删除后将移除该域名的 CDN 加速配置。" : pending === "offline" ? "下线后该域名将停止 CDN 加速服务。" : "确认恢复该域名的 CDN 加速服务？"} {detail?.name}</DialogDescription></DialogHeader>
+            {pending === "delete" && <div className="space-y-2"><Label htmlFor="delete-domain-confirm">输入完整域名确认删除</Label><Input id="delete-domain-confirm" autoComplete="off" value={confirmation} disabled={busy} onChange={event => setConfirmation(event.target.value)} /></div>}
+            <DialogFooter><Button variant="outline" disabled={busy} onClick={() => setConfirmOpen(false)}>取消</Button><Button variant={pending === "online" ? "default" : "destructive"} disabled={busy || (pending === "delete" && confirmation !== detail?.name)} onClick={executeAction}>{busy && <Loader2 className="animate-spin" />}确认{pending ? actionNames[pending] : ""}</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </SheetContent>
+    </Sheet>
+  </div>;
 }

@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { createBucket, forceDeleteBucket } from "../../lib/qiniu";
 import { useAppStore } from "../../store";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { SortField, formatRegion } from "./constants";
 import { BucketListHeader } from "./BucketListHeader";
 import { RegionFilterSelect, SearchInput } from "./Toolbar";
@@ -97,7 +97,7 @@ export function BucketList({
   useEffect(() => {
     if (scrollPosition > 0 && !loading && !refreshing && processedBuckets.length > 0) {
       requestAnimationFrame(() => {
-        const scrollArea = document.querySelector('[data-radix-scroll-area-viewport]');
+        const scrollArea = document.querySelector('[data-slot="scroll-area-viewport"]');
         if (scrollArea) {
           scrollArea.scrollTop = scrollPosition;
           onScrollPositionRestored?.();
@@ -149,7 +149,7 @@ export function BucketList({
       )}
 
       {!loading && !error && (
-        <div className="flex items-center gap-2 px-6 py-2.5 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
+        <div className="flex h-12 items-center gap-2 px-6 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
           <button
             onClick={() => setShowCreateDialog(true)}
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-all shadow-sm active:scale-95 cursor-pointer"

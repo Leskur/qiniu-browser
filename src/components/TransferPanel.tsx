@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTransferStore, TransferTask } from "../store/transfer";
 import { X, ChevronDown, ChevronUp, Upload, Download, Check, AlertCircle, Trash2, Loader2, Square } from "lucide-react";
 import { formatBytes } from "../lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 function formatSpeed(bytesPerSecond: number): string {
   if (bytesPerSecond < 1024) return `${bytesPerSecond.toFixed(0)} B/s`;

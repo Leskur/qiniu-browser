@@ -44,7 +44,16 @@ export function CreateBucketDialog({
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">存储区域</label>
-                <Select value={bucketRegion} onValueChange={setBucketRegion}>
+                <Select
+                  items={Object.entries(REGION_MAP).map(([code, name]) => ({
+                    value: code,
+                    label: `${name} (${code})`,
+                  }))}
+                  value={bucketRegion}
+                  onValueChange={(value) => {
+                    if (value !== null) setBucketRegion(value);
+                  }}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>

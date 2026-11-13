@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { toast } from "sonner";
-import { open } from "@tauri-apps/plugin-shell";
+import { toast } from "@/lib/toast";
 import { useAppStore, Theme } from "../store";
-import { Sun, Moon, Monitor, Cat, Download } from "lucide-react";
+import { Sun, Moon, Monitor } from "lucide-react";
 
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "light",  label: "浅色",   icon: Sun },
@@ -10,7 +9,7 @@ const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "跟随系统", icon: Monitor },
 ];
 
-export function SettingsPanel({ onCheckUpdate, appVersion }: { onCheckUpdate: () => void; appVersion: string }) {
+export function SettingsPanel({ appVersion }: { appVersion: string }) {
   const { 
     theme, setTheme,
     itemsPerPage, setItemsPerPage,
@@ -65,26 +64,8 @@ export function SettingsPanel({ onCheckUpdate, appVersion }: { onCheckUpdate: ()
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between px-6 py-3.5 border-b border-zinc-200 dark:border-zinc-800 shrink-0 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm">
+      <div className="flex h-14 items-center justify-between px-6 border-b border-zinc-200 dark:border-zinc-800 shrink-0 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm">
         <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-200">设置</h2>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => open('https://github.com/Leskur/qiniu-browser')}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-            title="访问 GitHub 仓库"
-          >
-            <Cat className="w-3.5 h-3.5" />
-            <span>GitHub</span>
-          </button>
-          <button
-            onClick={onCheckUpdate}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors cursor-pointer"
-            title="检查应用更新"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>检查更新</span>
-          </button>
-        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">

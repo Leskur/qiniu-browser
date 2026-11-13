@@ -247,6 +247,8 @@ export interface CdnTaskQueryOptions {
   requestId?: string;
   urls?: string[];
   isDir?: "yes" | "no";
+  startTime?: string;
+  endTime?: string;
   state?: "processing" | "success" | "failure";
   pageNo?: number;
   pageSize?: number;
@@ -261,6 +263,8 @@ export async function cdnQueryRefreshTasks(
   const {
     requestId,
     urls,
+    startTime,
+    endTime,
     isDir,
     state,
     pageNo = 0,
@@ -271,6 +275,8 @@ export async function cdnQueryRefreshTasks(
   if (urls && urls.length > 0) body.urls = urls;
   if (isDir) body.isDir = isDir;
   if (state) body.state = state;
+  if (startTime) body.startTime = startTime;
+  if (endTime) body.endTime = endTime;
 
   return fusionPost(ak, sk, "/v2/tune/refresh/list", body);
 }
@@ -284,6 +290,8 @@ export async function cdnQueryPrefetchTasks(
   const {
     requestId,
     urls,
+    startTime,
+    endTime,
     state,
     pageNo = 0,
     pageSize = 50,
@@ -292,6 +300,8 @@ export async function cdnQueryPrefetchTasks(
   if (requestId) body.requestId = requestId;
   if (urls && urls.length > 0) body.urls = urls;
   if (state) body.state = state;
+  if (startTime) body.startTime = startTime;
+  if (endTime) body.endTime = endTime;
 
   return fusionPost(ak, sk, "/v2/tune/prefetch/list", body);
 }

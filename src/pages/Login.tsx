@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Plus, Trash2, LogIn, Loader2, Eye, EyeOff, ChevronRight } from "lucide-react";
 import { validateCredentials } from "@/lib/qiniu";
 

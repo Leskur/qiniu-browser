@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAppStore } from "../store";
 import { Bookmark as BookmarkIcon, X, Pencil, LayoutGrid, List } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 type EditingState = { id: string; label: string } | null;
 
@@ -43,7 +43,7 @@ export function BookmarkPage({
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center gap-2 px-6 py-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm shrink-0">
+      <div className="flex h-14 items-center gap-2 px-6 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm shrink-0">
         <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">书签管理</span>
         <span className="text-xs text-zinc-400 dark:text-zinc-500 tabular-nums bg-zinc-50 dark:bg-zinc-800/50 px-1.5 py-0.5 rounded border border-zinc-200/50 dark:border-zinc-700/50">
           {bookmarks.length} 个
@@ -72,7 +72,7 @@ export function BookmarkPage({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="搜索书签..."
-              className="w-48 pl-8 pr-3 py-1.5 text-sm text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400/40 focus:border-amber-400 placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
+              className="h-8 w-48 pl-8 pr-3 text-sm text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400/40 focus:border-amber-400 placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
             />
             <svg className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />

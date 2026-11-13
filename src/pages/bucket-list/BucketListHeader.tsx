@@ -13,7 +13,7 @@ export function BucketListHeader({
   stats: Stats;
 }) {
   return (
-    <div className="flex items-center gap-2 px-6 py-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm shrink-0">
+    <div className="flex h-14 items-center gap-2 px-6 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm shrink-0">
       <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">空间管理</span>
       {stats.totalBuckets > 0 && (
         <>

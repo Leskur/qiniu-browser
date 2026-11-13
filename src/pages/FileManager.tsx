@@ -4,11 +4,11 @@ import { fetchFiles, fetchBucketDomains, QiniuFile, deleteFile, deleteDirectory,
 import { Skeleton } from "../components/ui/skeleton";
 import {
   File, Image, Film, FileText, Archive,
-  Link2, Check, RefreshCw, Trash2, Upload, FolderOpen,
+  Link2, Copy, Check, RefreshCw, Trash2, Upload, FolderOpen,
   Folder, ChevronRight, AlertCircle, Database, Download, X, Square, CheckSquare, ArrowUpDown, ArrowUp, ArrowDown, Pencil, ArrowLeft, ArrowRight,
   HardDrive, FileBox, Search, FolderPlus, ZoomIn, ChevronLeft, Maximize2, Bookmark
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -182,7 +182,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   const openCtxMenu = (e: React.MouseEvent, file: QiniuFile) => {
     e.preventDefault();
     e.stopPropagation();
-    const menuW = 176, menuH = 200;
+    const menuW = 176, menuH = 240;
     const x = e.clientX + menuW > window.innerWidth  ? e.clientX - menuW : e.clientX;
     const y = e.clientY + menuH > window.innerHeight ? e.clientY - menuH : e.clientY;
     setCtxMenu({ file, x, y });
@@ -945,6 +945,17 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     navigate(parts.join('/') + '/');
   };
 
+  const handleCopyFileName = async (e: React.MouseEvent, key: string) => {
+    e.stopPropagation();
+    const fileName = key.slice(key.lastIndexOf('/') + 1);
+    try {
+      await navigator.clipboard.writeText(fileName);
+      toast.success('已复制文件名');
+    } catch {
+      toast.error('复制文件名失败，请重试');
+    }
+  };
+
   // ─── Copy link ───────────────────────────────────────────────────────────
   const handleCopyLink = (e: React.MouseEvent, key: string) => {
     e.stopPropagation();
@@ -960,7 +971,9 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
       setCopiedKey(key);
       toast.success(
         isPrivateBucket ? "已复制临时访问链接" : "已复制到剪贴板",
-        isPrivateBucket ? { description: "链接约 1 小时内有效" } : undefined,
+        {
+          ...(isPrivateBucket ? { description: "链接约 1 小时内有效" } : {}),
+        },
       );
       setTimeout(() => setCopiedKey(null), 2000);
     }).catch(() => toast.error("复制失败"));
@@ -1074,7 +1087,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     <div className="relative flex flex-col h-full bg-white dark:bg-zinc-950 overflow-hidden">
 
       {/* ── Top Bar ── */}
-      <div className="flex items-center gap-3 px-6 py-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm shrink-0 min-w-0 relative z-20">
+      <div className="flex h-14 items-center gap-3 px-6 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-sm shrink-0 min-w-0 relative z-20">
         <button onClick={goBack} disabled={!canGoBack} title="后退（鼠标侧键）"
           className="p-1.5 rounded-lg transition-colors text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 active:scale-95 shrink-0 disabled:opacity-30 disabled:pointer-events-none cursor-pointer">
           <ArrowLeft className="w-4 h-4" />
@@ -1167,19 +1180,19 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
             </span>
             <button
               onClick={handleBatchDownload}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors"
-            >
-              <Download className="w-4 h-4" />批量下载
-            </button>
+            className="flex h-8 items-center gap-1.5 px-3 text-sm font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors"
+          >
+            <Download className="w-4 h-4" />批量下载
+          </button>
             <button
               onClick={() => setBatchDeletePending(true)}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors"
+              className="flex h-8 items-center gap-1.5 px-3 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors"
             >
               <Trash2 className="w-4 h-4" />批量删除
             </button>
             <button
               onClick={() => setSelectedKeys(new Set())}
-              className="p-2 rounded-lg text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+              className="flex size-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
               title="取消选择"
             >
               <X className="w-4 h-4" />
@@ -1199,7 +1212,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
             }}
             disabled={loading}
             title="刷新"
-            className="p-2 rounded-lg text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40"
+            className="flex size-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -1209,7 +1222,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
               setTimeout(() => searchInputRef.current?.focus(), 50);
             }}
             title="搜索 (Ctrl+F)"
-            className={`p-2 rounded-lg transition-colors ${searchActive || committedSearch ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'}`}
+            className={`flex size-8 items-center justify-center rounded-lg transition-colors ${searchActive || committedSearch ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'}`}
           >
             <Search className="w-4 h-4" />
           </button>
@@ -1223,14 +1236,14 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
               setShowBookmarkDialog(true);
             }}
             title="添加书签"
-            className={`p-2 rounded-lg transition-colors ${isCurrentBookmarked ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' : 'text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'}`}
+            className={`flex size-8 items-center justify-center rounded-lg transition-colors ${isCurrentBookmarked ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' : 'text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'}`}
           >
             <Bookmark className="w-4 h-4" fill={isCurrentBookmarked ? "currentColor" : "none"} />
           </button>
           <button
             onClick={() => handleUpload(false)}
             disabled={isUploading || loading}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:pointer-events-none"
+            className="flex h-8 items-center gap-1.5 px-3 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:pointer-events-none"
           >
             {isUploading
               ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1240,7 +1253,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
           <button
             onClick={() => handleUpload(true)}
             disabled={isUploading || loading}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 rounded-lg transition-all disabled:opacity-50 disabled:pointer-events-none"
+            className="flex h-8 items-center gap-1.5 px-3 text-sm font-medium text-zinc-700 dark:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 rounded-lg transition-all disabled:opacity-50 disabled:pointer-events-none"
           >
             <FolderOpen className="w-4 h-4" />
             上传文件夹
@@ -1248,7 +1261,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
           <button
             onClick={() => { setShowCreateFolder(true); setNewFolderName(""); }}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 rounded-lg transition-all disabled:opacity-50 disabled:pointer-events-none"
+            className="flex h-8 items-center gap-1.5 px-3 text-sm font-medium text-zinc-700 dark:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 rounded-lg transition-all disabled:opacity-50 disabled:pointer-events-none"
             title="新建文件夹"
           >
             <FolderPlus className="w-4 h-4" />
@@ -1473,12 +1486,24 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                           onBlur={() => commitRename(file.key)}
                           onKeyDown={e => { if (e.key === 'Enter') commitRename(file.key); if (e.key === 'Escape') setRenamingKey(null); }}
                           onClick={e => e.stopPropagation()}
-                          className="flex-1 w-full min-w-0 px-2 py-0.5 text-sm rounded border border-emerald-400 dark:border-emerald-600 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-emerald-400/40"
+                          className="file-name-input flex-1 w-full min-w-0 px-2 py-0.5 text-sm rounded border border-emerald-400 dark:border-emerald-600 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-emerald-400/40"
                         />
                       ) : (
-                        <span className="truncate w-full min-w-0 text-zinc-700 dark:text-zinc-200" title={file.key}>
-                          <HighlightText text={entry.name} query={committedSearch} />
-                        </span>
+                        <>
+                          <span className="truncate min-w-0 text-zinc-700 dark:text-zinc-200" title={file.key}>
+                            <HighlightText text={entry.name} query={committedSearch} />
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => { void handleCopyFileName(e, file.key); }}
+                            onDoubleClick={(e) => e.stopPropagation()}
+                            title="复制文件名"
+                            aria-label={`复制文件名：${file.key.slice(file.key.lastIndexOf('/') + 1)}`}
+                            className="shrink-0 p-1 rounded text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                        </>
                       )}
                     </div>
                     <div className="w-28 shrink-0 font-mono text-xs tabular-nums text-zinc-500">{formatBytes(file.fsize)}</div>
@@ -1545,6 +1570,12 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
               className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
             >
               <Pencil className="w-4 h-4 text-zinc-400" />重命名
+            </button>
+            <button
+              onClick={(e) => { void handleCopyFileName(e, ctxMenu.file.key); closeCtxMenu(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            >
+              <Copy className="w-4 h-4 text-zinc-400" />复制文件名
             </button>
             <button
               onClick={(e) => { handleCopyLink(e, ctxMenu.file.key); closeCtxMenu(); }}
@@ -1632,6 +1663,12 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
             {/* Footer */}
             <div className="px-4 py-4 border-t border-zinc-100 dark:border-zinc-800 flex flex-col gap-2 shrink-0">
+              <button
+                onClick={(e) => { void handleCopyFileName(e, selectedFile.key); }}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+              >
+                <Copy className="w-4 h-4" />复制文件名
+              </button>
               <button
                 onClick={(e) => { handleCopyLink(e, selectedFile.key); }}
                 className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"

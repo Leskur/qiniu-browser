@@ -502,8 +502,16 @@ export interface CdnDomain {
   registerNo?: string;    // 备案号
   operatingState: string; // 运营状态: success(成功) / processing(处理中) / failed(失败)
   operatingStateDesc?: string; // 状态描述
-  createAt: number;       // 创建时间（Unix 时间戳）
-  modifyAt: number;       // 修改时间（Unix 时间戳）
+  createAt: number | string;
+  modifyAt: number | string;
+  source?: {
+    sourceType?: string;
+    sourceQiniuBucket?: string;
+    sourceDomain?: string;
+    sourceHost?: string;
+    sourceIPs?: string[];
+  };
+  https?: { certId?: string; forceHttps?: boolean; http2Enable?: boolean };
 }
 
 export interface CdnDomainListResult {
@@ -543,6 +551,7 @@ export async function fetchCdnDomains(
   }
 
   const data = await response.json();
+  if (data.code !== undefined && data.code !== 200) throw new Error(data.error || "域名查询失败");
   return data as CdnDomainListResult;
 }
 
@@ -571,6 +580,7 @@ export async function fetchCdnDomain(
   }
 
   const data = await response.json();
+  if (data.code !== undefined && data.code !== 200) throw new Error(data.error || "域名查询失败");
   return data as CdnDomain;
 }
 
@@ -582,21 +592,7 @@ export async function onlineCdnDomain(
   sk: string,
   domain: string
 ): Promise<void> {
-  const host = "api.qiniu.com";
-  const path = `/domain/${domain}/online`;
-  const url = `https://${host}${path}`;
-  const token = generateQiniuToken(ak, sk, "POST", path, host);
-
-  const response = await loggedFetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: token,
-    },
-  });
-
-  if (!response.ok) {
-    throw await parseQiniuError(response, "上线域名失败");
-  }
+  await changeCdnDomain(ak, sk, domain, "online");
 }
 
 /**
@@ -607,21 +603,7 @@ export async function offlineCdnDomain(
   sk: string,
   domain: string
 ): Promise<void> {
-  const host = "api.qiniu.com";
-  const path = `/domain/${domain}/offline`;
-  const url = `https://${host}${path}`;
-  const token = generateQiniuToken(ak, sk, "POST", path, host);
-
-  const response = await loggedFetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: token,
-    },
-  });
-
-  if (!response.ok) {
-    throw await parseQiniuError(response, "下线域名失败");
-  }
+  await changeCdnDomain(ak, sk, domain, "offline");
 }
 
 /**
@@ -632,19 +614,24 @@ export async function deleteCdnDomain(
   sk: string,
   domain: string
 ): Promise<void> {
+  await changeCdnDomain(ak, sk, domain, "delete");
+}
+
+async function changeCdnDomain(ak: string, sk: string, domain: string, action: "online" | "offline" | "delete") {
   const host = "api.qiniu.com";
-  const path = `/domain/${domain}`;
-  const url = `https://${host}${path}`;
-  const token = generateQiniuToken(ak, sk, "DELETE", path, host);
-
-  const response = await loggedFetch(url, {
-    method: "DELETE",
-    headers: {
-      Authorization: token,
-    },
+  const method = action === "delete" ? "DELETE" : "POST";
+  const path = `/domain/${encodeURIComponent(domain)}${action === "delete" ? "" : `/${action}`}`;
+  const response = await loggedFetch(`https://${host}${path}`, {
+    method,
+    headers: { Authorization: generateQiniuToken(ak, sk, method, path, host) },
   });
-
-  if (!response.ok) {
-    throw await parseQiniuError(response, "删除域名失败");
+  const text = await response.text();
+  let result: { code?: number; error?: string } = {};
+  if (text) {
+    try { result = JSON.parse(text); }
+    catch { throw new Error(`域名操作返回了无效响应（HTTP ${response.status}）`); }
+  }
+  if (!response.ok || (result.code !== undefined && result.code !== 200)) {
+    throw new Error(result.error || `域名操作失败：${response.status}`);
   }
 }

@@ -129,6 +129,12 @@
   }
 }
 
+/* Set selection colors directly on the editor for native WebKit text fields. */
+.file-name-input::selection {
+  background-color: #2563eb;
+  color: #fff;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
