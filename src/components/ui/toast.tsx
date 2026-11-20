@@ -5,7 +5,7 @@ import { Toast as ToastPrimitive } from "@base-ui/react/toast"
 import { cn } from "@/lib/utils"
 
 import { Button } from "@/components/ui/button"
-import { XIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
+import { XIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon, CopyIcon, CheckIcon } from "lucide-react"
 
 const toast = ToastPrimitive.createToastManager()
 
@@ -74,7 +74,7 @@ function ToastTitle({ className, ...props }: ToastPrimitive.Title.Props) {
   return (
     <ToastPrimitive.Title
       data-slot="toast-title"
-      className={cn("text-sm font-medium", className)}
+      className={cn("select-text text-sm font-medium", className)}
       {...props}
     />
   )
@@ -87,7 +87,7 @@ function ToastDescription({
   return (
     <ToastPrimitive.Description
       data-slot="toast-description"
-      className={cn("text-sm text-muted-foreground", className)}
+      className={cn("select-text break-words text-sm text-muted-foreground", className)}
       {...props}
     />
   )
@@ -173,6 +173,35 @@ function ToastIcon({ type }: { type: string | undefined }) {
   )
 }
 
+function notificationText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node)
+  if (Array.isArray(node)) return node.map(notificationText).join("")
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) return notificationText(node.props.children)
+  return ""
+}
+
+function CopyToastButton({ text }: { text: string }) {
+  const [status, setStatus] = React.useState<"idle" | "copied" | "failed">("idle")
+  return <Button
+    variant="ghost"
+    size="icon-sm"
+    className="shrink-0 text-muted-foreground"
+    aria-label={status === "copied" ? "已复制通知内容" : "复制通知内容"}
+    title={status === "failed" ? "复制失败，请选中文字手动复制" : status === "copied" ? "已复制" : "复制通知内容"}
+    onClick={async () => {
+      try {
+        await navigator.clipboard.writeText(text)
+        setStatus("copied")
+      } catch {
+        setStatus("failed")
+      }
+    }}
+  >
+    {status === "copied" ? <CheckIcon /> : <CopyIcon />}
+    {status === "failed" && <span className="sr-only" role="status">复制失败，请选中文字手动复制</span>}
+  </Button>
+}
+
 function ToastList() {
   const { toasts } = ToastPrimitive.useToastManager()
 
@@ -180,11 +209,14 @@ function ToastList() {
     <Toast key={toastItem.id} toast={toastItem}>
       <ToastContent>
         <ToastIcon type={toastItem.type} />
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-1" onPointerDown={event => event.stopPropagation()}>
           <ToastTitle />
           <ToastDescription />
         </div>
         <ToastAction />
+        {toastItem.type !== "loading" && (notificationText(toastItem.title) || notificationText(toastItem.description)) && (
+          <CopyToastButton text={[notificationText(toastItem.title), notificationText(toastItem.description)].filter(Boolean).join("\n")} />
+        )}
         <ToastClose />
       </ToastContent>
     </Toast>

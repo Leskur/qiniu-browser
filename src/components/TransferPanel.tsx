@@ -47,7 +47,7 @@ const TaskItemView = memo(function TaskItemView({
   const Icon = task.type === 'upload' ? Upload : Download;
   const StatusIcon = task.status === 'completed' ? Check
     : task.status === 'failed' ? AlertCircle
-    : task.status === 'cancelled' ? Square
+    : (task.status === 'cancelled' || task.status === 'skipped') ? Square
     : task.status === 'transferring' ? Loader2
     : null;
 
@@ -75,7 +75,7 @@ const TaskItemView = memo(function TaskItemView({
               <StatusIcon className={`w-4 h-4 shrink-0 ${
                 task.status === 'completed' ? 'text-emerald-500' :
                 task.status === 'failed' ? 'text-red-500' :
-                task.status === 'cancelled' ? 'text-zinc-400' :
+                (task.status === 'cancelled' || task.status === 'skipped') ? 'text-zinc-400' :
                 'text-blue-500 animate-spin'
               }`} />
             )}
@@ -85,6 +85,7 @@ const TaskItemView = memo(function TaskItemView({
             <p className="text-xs text-red-500 mb-1 truncate">{task.error}</p>
           )}
 
+          {task.status === 'skipped' && <p className="text-xs text-zinc-400 mb-1">同名文件已跳过</p>}
           {task.status === 'cancelled' && (
             <p className="text-xs text-zinc-400 mb-1">已停止</p>
           )}
@@ -164,7 +165,7 @@ export function TransferPanel() {
       if (t.status === 'completed') {
         uploadDone++;
         uploadTransferred += Math.max(0, t.totalSize || 0);
-      } else if (t.status === 'failed' || t.status === 'cancelled') {
+      } else if (t.status === 'failed' || t.status === 'cancelled' || t.status === 'skipped') {
         uploadFailed++;
         uploadTransferred += Math.max(0, t.transferredSize || 0);
       } else {

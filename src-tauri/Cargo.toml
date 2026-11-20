@@ -29,7 +29,7 @@ tauri-plugin-http = "2.5.9"
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
 log = "0.4"
-qiniu-sdk = { version = "0.2.4", default-features = false, features = ["reqwest", "upload", "credential"] }
+qiniu-sdk = { version = "0.2.4", default-features = false, features = ["reqwest", "upload", "credential", "http-client"] }
 walkdir = "2.5.0"
 rayon = "1.10"
 reqwest = { version = "0.12", features = ["stream"] }

@@ -4,9 +4,12 @@ import { Toaster } from "./components/ui/toast";
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { getVersion } from '@tauri-apps/api/app';
-import { isTauri } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
+import { Label } from "./components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./components/ui/dialog";
 import { Login } from "./pages/Login";
 import { FileManager } from "./pages/FileManager";
 import { BucketList } from "./pages/bucket-list/BucketList";
@@ -20,7 +23,7 @@ import { useAppStore } from "./store";
 import {
   Database, Zap, LogOut, Settings, Bookmark,
   X, Folder, Globe, Loader2, Download,
-  PanelLeftClose, PanelLeft,
+  PanelLeftClose, PanelLeft, Pencil,
 } from "lucide-react";
 import "./App.css";
 
@@ -48,6 +51,10 @@ function App() {
   const [activeSection, setActiveSection] = useState<Section>("storage");
   const [cdnSubSection, setCdnSubSection] = useState<CdnSubSection>("domains");
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showRenameAccount, setShowRenameAccount] = useState(false);
+  const [accountName, setAccountName] = useState("");
+  const [renamingAccount, setRenamingAccount] = useState(false);
+  const accountRenameInFlight = useRef(false);
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
   const [prefillDomain, setPrefillDomain] = useState<string>("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1");
@@ -82,6 +89,27 @@ function App() {
   const handleLogin = (ak: string, sk: string, description?: string) => {
     setCredentials({ ak, sk, description: description || "" });
     setIsAuthenticated(true);
+  };
+
+  const handleRenameAccount = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const description = accountName.trim();
+    if (!description || accountRenameInFlight.current) return;
+    accountRenameInFlight.current = true;
+    setRenamingAccount(true);
+    try {
+      if (isTauri()) {
+        await invoke("rename_history", { accessKey: credentials.ak, description });
+      }
+      setCredentials({ ...credentials, description });
+      setShowRenameAccount(false);
+      toast.success("账号已重命名");
+    } catch (error) {
+      toast.error("重命名失败", { description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      accountRenameInFlight.current = false;
+      setRenamingAccount(false);
+    }
   };
 
   // Check silently at startup; keep the returned update for a direct install.
@@ -347,14 +375,18 @@ function App() {
                         : undefined
                     }
                   >
-                    <div className="p-3 border-b border-zinc-100 dark:border-zinc-800">
-                      <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">当前账号</p>
-                      {credentials.description && (
-                        <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 mb-1">{credentials.description}</p>
-                      )}
-                      <p className="text-xs font-mono text-zinc-500 dark:text-zinc-400 break-all">{credentials.ak}</p>
-                    </div>
                     <div className="py-1">
+                      <button
+                        onClick={() => {
+                          setAccountName(credentials.description || "");
+                          setShowAccountMenu(false);
+                          setShowRenameAccount(true);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4 shrink-0" />
+                        <span>重命名</span>
+                      </button>
                       <button
                         onClick={() => { handleLogout(); setShowAccountMenu(false); }}
                         className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left cursor-pointer"
@@ -451,6 +483,38 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {isAuthenticated && (
+        <Dialog open={showRenameAccount} onOpenChange={(open) => { if (!accountRenameInFlight.current) setShowRenameAccount(open); }}>
+          <DialogContent showCloseButton={!renamingAccount}>
+            <DialogHeader>
+              <DialogTitle>重命名账号</DialogTitle>
+              <DialogDescription>修改此账号在应用中显示的名称。</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleRenameAccount} className="grid gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="account-name">账号名称</Label>
+                <Input
+                  id="account-name"
+                  autoFocus
+                  required
+                  value={accountName}
+                  onChange={(event) => setAccountName(event.target.value)}
+                  onFocus={(event) => event.target.select()}
+                  placeholder="如：公司账号、个人账号"
+                  disabled={renamingAccount}
+                />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" disabled={renamingAccount} onClick={() => setShowRenameAccount(false)}>取消</Button>
+                <Button type="submit" disabled={renamingAccount || !accountName.trim()}>
+                  {renamingAccount ? <><Loader2 className="animate-spin" />保存中...</> : "保存"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       )}
       
       {/* Transfer Panel - Global */}

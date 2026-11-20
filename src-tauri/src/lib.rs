@@ -5,6 +5,87 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// 全局上传取消标志：true 时跳过未开始文件，并中断进行中的上传
 static UPLOAD_CANCEL_FLAG: AtomicBool = AtomicBool::new(false);
 
+#[derive(serde::Serialize)]
+struct QiniuApiResponse {
+    status: u16,
+    body: String,
+}
+
+// 保留七牛非标准 HTTP 状态码，避免 Web Response 限制丢失业务错误。
+#[tauri::command]
+async fn qiniu_api_request(
+    url: String,
+    method: String,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
+) -> Result<QiniuApiResponse, String> {
+    let url = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
+    let host = url.host_str().unwrap_or_default();
+    if url.scheme() != "https"
+        || !(host.ends_with(".qiniuapi.com") || host == "api.qiniu.com" || host.ends_with(".qiniup.com"))
+    {
+        return Err("仅支持七牛 API 请求".into());
+    }
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let client = CLIENT.get_or_init(|| reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .expect("Failed to create Qiniu HTTP client"));
+    let method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
+    send_qiniu_api_request(client, method, url, headers, body).await
+}
+
+async fn send_qiniu_api_request(
+    client: &reqwest::Client,
+    method: reqwest::Method,
+    url: reqwest::Url,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
+) -> Result<QiniuApiResponse, String> {
+    let mut request = client.request(method, url);
+    for (name, value) in headers {
+        request = request.header(name, value);
+    }
+    if let Some(body) = body {
+        request = request.body(body);
+    }
+    let response = request.send().await.map_err(|e| e.to_string())?;
+    let status = response.status().as_u16();
+    let body = response.text().await.map_err(|e| e.to_string())?;
+    Ok(QiniuApiResponse { status, body })
+}
+
+#[cfg(test)]
+mod qiniu_http_tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    #[test]
+    fn preserves_qiniu_614_and_error_body() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0; 4096];
+            socket.read(&mut request).unwrap();
+            let body = r#"{"error":"file exists"}"#;
+            write!(socket, "HTTP/1.1 614 File Exists\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+        });
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let response = runtime.block_on(send_qiniu_api_request(
+            &reqwest::Client::builder().no_proxy().build().unwrap(),
+            reqwest::Method::POST,
+            reqwest::Url::parse(&format!("http://{address}/move/source/dest/force/false")).unwrap(),
+            vec![],
+            None,
+        )).unwrap();
+        assert_eq!(response.status, 614);
+        assert_eq!(response.body, r#"{"error":"file exists"}"#);
+        server.join().unwrap();
+    }
+}
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -105,6 +186,42 @@ fn save_history(new_item: HistoryItem) -> Result<(), String> {
     fs::write(&history_path, serde_json::to_string_pretty(&history).unwrap())
         .map_err(|e| e.to_string())?;
 
+    Ok(())
+}
+
+#[tauri::command]
+fn rename_history(access_key: String, description: String) -> Result<(), String> {
+    let description = description.trim();
+    if description.is_empty() {
+        return Err("账号名称不能为空".into());
+    }
+    let home_path_str = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| "Cannot find home directory".to_string())?;
+    let history_path = PathBuf::from(home_path_str)
+        .join(".qiniu-browser")
+        .join("ak_histories.json");
+
+    // 未记住的账号只更新当前会话，不创建登录记录。
+    if !history_path.exists() {
+        return Ok(());
+    }
+    let content = fs::read_to_string(&history_path).map_err(|e| e.to_string())?;
+    let mut history: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let items = history.get_mut("historyItems")
+        .and_then(|v| v.as_array_mut())
+        .ok_or_else(|| "Invalid history format".to_string())?;
+    let mut updated = false;
+    for item in items {
+        if item.get("accessKey").and_then(|v| v.as_str()) == Some(access_key.as_str()) {
+            item["description"] = serde_json::Value::String(description.to_string());
+            updated = true;
+        }
+    }
+    if updated {
+        let content = serde_json::to_string_pretty(&history).map_err(|e| e.to_string())?;
+        fs::write(&history_path, content).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -230,6 +347,7 @@ struct DownloadProgressEvent {
 
 #[derive(serde::Serialize)]
 struct UploadResult {
+    skipped: Vec<String>,
     uploaded: Vec<String>,
     failed: Vec<String>,
 }
@@ -243,22 +361,26 @@ async fn upload_files(
     file_paths: Vec<String>,
     prefix: String,
     relative_paths: Option<Vec<String>>,
+    conflict_policy: Option<String>,
 ) -> Result<UploadResult, String> {
     info!("上传开始: bucket={}, prefix={}, files={}", bucket, prefix, file_paths.len());
+    let policy = conflict_policy.unwrap_or_else(|| "skip".into());
+    if !["skip", "overwrite"].contains(&policy.as_str()) { return Err("无效的同名处理策略".into()); }
     UPLOAD_CANCEL_FLAG.store(false, Ordering::SeqCst);
     let app_clone = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let upload_manager = UploadManager::builder(
-            UploadTokenSigner::new_credential_provider(
+            UploadTokenSigner::new_credential_provider_builder(
                 Credential::new(&ak, &sk),
                 &bucket,
                 Duration::from_secs(3600),
-            )
+            ).on_policy_generated({ let overwrite = policy == "overwrite"; move |builder| { if !overwrite { builder.insert_only(); } Ok(()) } }).build()
         ).build();
 
         let files = collect_files(file_paths, &prefix, relative_paths);
         let uploaded: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let failed: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let skipped: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let cancelled: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
         files.par_iter().for_each(|(path, key)| {
@@ -345,27 +467,30 @@ async fn upload_files(
                 Ok(())
             });
             
-            let upload_params = || {
+            let upload_params = |target: &str| {
                 AutoUploaderObjectParams::builder()
-                    .object_name(key.clone())
-                    .file_name(key.clone())
+                    .object_name(target.to_string())
+                    .file_name(target.to_string())
                     .build()
             };
             // 大文件中断后，再执行一次同样的上传，SDK 会按断点记录接着传
-            let first = auto_uploader.upload_path(path, upload_params());
-            let upload_result = match first {
-                Err(err) if !UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) => {
-                    info!("上传中断，按断点记录重试: {} - {}", key, err);
-                    auto_uploader.upload_path(path, upload_params())
-                }
-                other => other,
-            };
+            let is_conflict = |error: &qiniu_sdk::http_client::ResponseError| matches!(error.kind(), qiniu_sdk::http_client::ResponseErrorKind::StatusCodeError(code) if code.as_u16() == 614);
+            let target = key.clone();
+            let mut upload_result = auto_uploader.upload_path(path, upload_params(&target));
+            if upload_result.as_ref().err().is_some_and(|e| !is_conflict(e)) && !UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
+                upload_result = auto_uploader.upload_path(path, upload_params(&target));
+            }
+            if policy == "skip" && upload_result.as_ref().err().is_some_and(|e| is_conflict(e)) && !UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
+                skipped.lock().unwrap().push(key.clone());
+                let _ = app_clone.emit("upload-progress", UploadProgressEvent { task_id, file_name, file_path, total_size, uploaded_size: 0, progress: 0.0, status: "skipped".into(), error: Some("同名文件已跳过".into()) });
+                return;
+            }
 
             match upload_result {
                 Ok(_) => {
                     // 极端情况下完成瞬间才取消，仍记为成功
                     info!("上传成功: {}", key);
-                    uploaded.lock().unwrap().push(key.clone());
+                    uploaded.lock().unwrap().push(target.clone());
                     let _ = app_clone.emit("upload-progress", UploadProgressEvent {
                         task_id,
                         file_name,
@@ -416,6 +541,7 @@ async fn upload_files(
         }
 
         Ok(UploadResult {
+            skipped: skipped.into_inner().unwrap(),
             uploaded: uploaded.into_inner().unwrap(),
             failed: failed.into_inner().unwrap(),
         })
@@ -686,7 +812,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![greet, get_histories, get_kodo_histories, save_history, delete_history, upload_files, cancel_uploads, download_file, download_files_to_dir, scan_folder, path_is_dir, classify_paths])
+        .invoke_handler(tauri::generate_handler![greet, qiniu_api_request, get_histories, get_kodo_histories, save_history, rename_history, delete_history, upload_files, cancel_uploads, download_file, download_files_to_dir, scan_folder, path_is_dir, classify_paths])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

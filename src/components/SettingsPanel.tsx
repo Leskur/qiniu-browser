@@ -1,7 +1,9 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "@/lib/toast";
+import { isTauri } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useAppStore, Theme } from "../store";
-import { Palette, LayoutList, Timer, Trash2, Info } from "lucide-react";
+import { Palette, LayoutList, Timer, Trash2, Info, MessageSquare } from "lucide-react";
 import { Button } from "./ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "./ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "./ui/dialog";
@@ -113,45 +115,15 @@ export function SettingsPanel({ appVersion }: { appVersion: string }) {
     theme, setTheme,
     itemsPerPage, setItemsPerPage,
     cacheExpireMinutes, setCacheExpireMinutes,
+    clearCaches,
   } = useAppStore();
 
-  const [cacheSize, setCacheSize] = useState<string>("计算中...");
   const [clearOpen, setClearOpen] = useState(false);
 
-  const calcCacheSize = () => {
-    try {
-      let totalSize = 0;
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key) {
-          const value = localStorage.getItem(key);
-          if (value) totalSize += key.length + value.length;
-        }
-      }
-      setCacheSize(`${(totalSize / 1024).toFixed(2)} KB`);
-    } catch {
-      setCacheSize("无法计算");
-    }
-  };
-
-  useEffect(() => {
-    calcCacheSize();
-  }, []);
-
   const handleClearCache = () => {
-    const settingsKeys = ["qiniu-browser-settings", "qiniu_auto_login", "qiniu_last_login_ak", "qiniu_session"];
-    const settingsData: Record<string, string> = {};
-    settingsKeys.forEach(key => {
-      const value = localStorage.getItem(key);
-      if (value) settingsData[key] = value;
-    });
-    localStorage.clear();
-    Object.entries(settingsData).forEach(([key, value]) => {
-      localStorage.setItem(key, value);
-    });
+    clearCaches();
     toast.success("缓存已清除");
     setClearOpen(false);
-    calcCacheSize();
   };
 
   return (
@@ -169,6 +141,9 @@ export function SettingsPanel({ appVersion }: { appVersion: string }) {
                 if (value === "light" || value === "dark" || value === "system") setTheme(value);
               }}
             />
+          </SettingsSection>
+
+          <SettingsSection title="文件浏览">
             <SettingsSelectRow
               icon={LayoutList}
               label="每页显示"
@@ -186,8 +161,8 @@ export function SettingsPanel({ appVersion }: { appVersion: string }) {
           <SettingsSection title="缓存">
             <SettingsSelectRow
               icon={Timer}
-              label="过期时间"
-              aria-label="过期时间"
+              label="文件列表缓存时间"
+              aria-label="文件列表缓存时间"
               items={CACHE_EXPIRE_ITEMS}
               value={String(cacheExpireMinutes)}
               onValueChange={value => {
@@ -198,12 +173,25 @@ export function SettingsPanel({ appVersion }: { appVersion: string }) {
             <SettingsActionRow
               icon={Trash2}
               label="清除缓存"
-              value={`已使用 ${cacheSize}`}
+              value="文件列表与域名"
               onClick={() => setClearOpen(true)}
             />
           </SettingsSection>
 
           <SettingsSection title="其他">
+            <SettingsActionRow
+              icon={MessageSquare}
+              label="问题反馈"
+              value="GitHub Issues"
+              onClick={() => {
+                const url = "https://github.com/Leskur/qiniu-browser/issues";
+                if (isTauri()) {
+                  openUrl(url).catch(() => toast.error("打开问题反馈页面失败，请重试"));
+                } else {
+                  window.open(url, "_blank", "noopener,noreferrer");
+                }
+              }}
+            />
             <div className={rowClass}>
               <Info className="size-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
               <span className="min-w-0 flex-1 text-sm text-zinc-800 dark:text-zinc-100">关于</span>
@@ -220,7 +208,7 @@ export function SettingsPanel({ appVersion }: { appVersion: string }) {
           <DialogHeader>
             <DialogTitle>清除缓存</DialogTitle>
             <DialogDescription>
-              将清除本地缓存数据（约 {cacheSize}），登录状态与偏好设置会保留。此操作不可撤销。
+              将清除文件列表和域名缓存，下次访问时重新获取。账号、登录状态、书签及偏好设置会保留。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

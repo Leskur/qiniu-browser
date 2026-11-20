@@ -1,12 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/lib/toast";
-import { Plus, Trash2, LogIn, Loader2, Eye, EyeOff, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Loader2, Eye, EyeOff, ArrowLeft, ArrowRight, Import } from "lucide-react";
 import { validateCredentials } from "@/lib/qiniu";
 
 interface HistoryItem {
@@ -30,14 +31,14 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
   const [showSk, setShowSk] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loggingInKey, setLoggingInKey] = useState<string | null>(null);
-  const [autoLogin, setAutoLogin] = useState(() => {
-    return localStorage.getItem('qiniu_auto_login') === 'true';
-  });
 
   // Kodo import
   const [isImporting, setIsImporting] = useState(false);
   const [showKodoDialog, setShowKodoDialog] = useState(false);
   const [kodoItems, setKodoItems] = useState<HistoryItem[]>([]);
+  const [selectedKodoKeys, setSelectedKodoKeys] = useState<Set<string>>(new Set());
+  const [savingImport, setSavingImport] = useState(false);
+  const importInFlight = useRef(false);
 
   // Load histories on mount and try auto-login
   useEffect(() => {
@@ -49,9 +50,7 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
     try {
       // 从 localStorage 获取上次登录的账号
       const lastLoginKey = localStorage.getItem('qiniu_last_login_ak');
-      const autoLogin = localStorage.getItem('qiniu_auto_login') === 'true';
-      
-      if (!lastLoginKey || !autoLogin) return;
+      if (!lastLoginKey) return;
 
       // 等待历史记录加载完成
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -171,7 +170,8 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
         toast.error("Kodo Browser 配置中未找到凭证");
         return;
       }
-      setKodoItems(validItems);
+      setKodoItems([...new Map(validItems.map(item => [item.accessKey, item])).values()]);
+      setSelectedKodoKeys(new Set());
       setShowKodoDialog(true);
     } catch (err: any) {
       toast.error("导入失败", { description: err.message || "未找到 Kodo Browser 配置" });
@@ -180,130 +180,145 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
     }
   };
 
-  const handleSelectKodoItem = async (item: HistoryItem) => {
-    console.log("[kodo import] selected item:", { accessKey: item.accessKey, description: item.description });
+  const handleImportSelected = async () => {
+    if (importInFlight.current || selectedKodoKeys.size === 0) return;
+    importInFlight.current = true;
+    setSavingImport(true);
+    const selected = kodoItems.filter(item => selectedKodoKeys.has(item.accessKey));
+    const failed = new Set<string>();
+    let firstError = "";
     try {
-      console.log("[kodo import] calling save_history...");
-      await invoke("save_history", {
-        newItem: {
-          endpointType: "public",
-          accessKey: item.accessKey,
-          accessSecret: item.accessSecret,
-          rememberMe: true,
-          description: item.description || "",
-        },
-      });
-      console.log("[kodo import] save_history ok, reloading histories...");
-      toast.success("已导入");
-      await loadHistories();
-      console.log("[kodo import] loadHistories ok, switching to list view");
-      setShowKodoDialog(false);
-      setViewMode("list");
-    } catch (err: any) {
-      console.error("[kodo import] failed:", err);
-      toast.error("导入失败", { description: err.message });
+      // 顺序写入，避免多个保存操作同时覆盖本地历史文件。
+      for (const item of selected) {
+        try {
+          await invoke("save_history", {
+            newItem: {
+              endpointType: "public",
+              accessKey: item.accessKey,
+              accessSecret: item.accessSecret,
+              rememberMe: true,
+              description: item.description || "",
+            },
+          });
+        } catch (error) {
+          failed.add(item.accessKey);
+          if (!firstError) firstError = error instanceof Error ? error.message : String(error);
+        }
+      }
+      const imported = selected.length - failed.size;
+      if (imported > 0) {
+        await loadHistories();
+        setViewMode("list");
+      }
+      setSelectedKodoKeys(failed);
+      if (failed.size > 0) {
+        toast.error(`已导入 ${imported} 个，${failed.size} 个失败`, { description: `${firstError}。失败账号已保留勾选，可重试。` });
+      } else {
+        setShowKodoDialog(false);
+        toast.success(`已导入 ${imported} 个账号`);
+      }
+    } finally {
+      importInFlight.current = false;
+      setSavingImport(false);
     }
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-zinc-50 dark:bg-zinc-950 p-4">
-      <Card className="w-full max-w-md shadow-xl border-zinc-200/50 dark:border-zinc-800/50 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl">
-        <CardHeader className="space-y-1 text-center pb-6">
-          <div className="flex justify-center mb-4">
-            <img src="/logo.png" alt="Qiniu Logo" className="h-16 w-auto object-contain drop-shadow-sm" />
-          </div>
-          <CardTitle className="text-3xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
-            Qiniu Browser
-          </CardTitle>
-          <CardDescription className="text-zinc-500">
-            {viewMode === "list" ? "选择账号登录" : "输入七牛云 AccessKey 和 SecretKey"}
-          </CardDescription>
-        </CardHeader>
+    <div className="relative flex min-h-screen flex-col bg-zinc-50 text-foreground dark:bg-zinc-950">
+      <header className="flex h-16 shrink-0 items-center justify-between px-6 sm:px-8">
+        <div className="flex items-center gap-2.5">
+          <img src="/app-icon.png" alt="" className="size-7 rounded-lg object-contain" />
+          <span className="text-sm font-semibold tracking-tight">Qiniu Browser</span>
+        </div>
+        <ThemeSwitcher />
+      </header>
+      <div className="flex flex-1 items-center justify-center px-5 pb-16 pt-6">
+      <section aria-labelledby="login-title" className="w-full max-w-sm">
+        <div className="mb-6">
+          {viewMode === "form" && historyItems.length > 0 && (
+            <Button variant="ghost" size="sm" className="-ml-2 mb-4 text-muted-foreground" disabled={isLoggingIn} onClick={() => { setViewMode("list"); setAk(""); setSk(""); setDescription(""); }}>
+              <ArrowLeft />返回账号列表
+            </Button>
+          )}
+          <h1 id="login-title" className="text-2xl font-semibold tracking-tight">
+            {loadingHistory ? "正在加载账号" : viewMode === "list" ? "选择账号" : "连接七牛云"}
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {viewMode === "list" ? "选择一个已保存的账号，继续管理你的资源。" : "使用 AccessKey 和 SecretKey 登录。"}
+          </p>
+        </div>
 
-        <CardContent className="pb-4">
+        <div>
           {/* ── Account list mode ── */}
           {viewMode === "list" && (
             <div className="space-y-3">
-              {/* Auto-login toggle */}
-              <div className="flex items-center justify-between px-1 py-2">
-                <Label htmlFor="autoLoginToggle" className="text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer">
-                  自动登录上次使用的账号
-                </Label>
-                <Checkbox
-                  id="autoLoginToggle"
-                  checked={autoLogin}
-                  onCheckedChange={(checked) => {
-                    const value = checked === true;
-                    setAutoLogin(value);
-                    localStorage.setItem('qiniu_auto_login', value.toString());
-                  }}
-                />
-              </div>
-
               {loadingHistory ? (
                 <div className="flex justify-center py-8">
                   <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="overflow-hidden rounded-xl border bg-background p-1">
+                  <div id="saved-accounts" role="group" aria-label="已保存账号" className="max-h-42 overflow-y-auto overscroll-contain">
                   {historyItems.map((item) => {
                     const isLoading = loggingInKey === item.accessKey;
                     const displayLabel = item.accessKey.substring(0, 16) + "...";
                     return (
                       <div
                         key={item.accessKey}
-                        onClick={() => !isLoading && loggingInKey === null && handleSelectHistory(item)}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:border-emerald-400 dark:hover:border-emerald-600 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 transition-all group text-left cursor-pointer ${loggingInKey !== null ? 'opacity-60 pointer-events-none' : ''}`}
+                        className="group flex items-center rounded-lg transition-colors hover:bg-muted/70 focus-within:bg-muted/70"
                       >
+                        <button
+                          type="button"
+                          disabled={loggingInKey !== null}
+                          onClick={() => handleSelectHistory(item)}
+                          className="flex h-14 min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
+                        >
                         {/* Avatar */}
-                        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-emerald-600/10 bg-emerald-50 text-xs font-semibold text-emerald-700 dark:border-emerald-400/10 dark:bg-emerald-400/10 dark:text-emerald-400">
                           {(item.description || item.accessKey).charAt(0).toUpperCase()}
                         </div>
 
                         {/* Info */}
                         <div className="flex-1 min-w-0">
-                          {item.description ? (
-                            <>
-                              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 truncate">{item.description}</p>
-                              <p className="text-xs font-mono text-zinc-400 dark:text-zinc-500 truncate mt-0.5">{displayLabel}</p>
-                            </>
-                          ) : (
-                            <p className="text-sm font-mono text-zinc-700 dark:text-zinc-300 truncate">{displayLabel}</p>
-                          )}
+                          <p className="truncate text-sm font-medium">{item.description || "未命名账号"}</p>
+                          <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{displayLabel}</p>
                         </div>
 
                         {/* Right side */}
                         {isLoading ? (
                           <Loader2 className="w-4 h-4 animate-spin text-emerald-500 shrink-0" />
-                        ) : (
-                          <div className="flex items-center gap-1 shrink-0">
+                        ) : null}
+                        </button>
                             <button
+                              type="button"
                               onClick={(e) => handleDeleteHistory(e, item.accessKey)}
-                              className="p-1.5 rounded-lg text-zinc-300 dark:text-zinc-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 opacity-0 group-hover:opacity-100 transition-all"
-                              title="删除"
+                              disabled={loggingInKey !== null}
+                              className="mr-2 rounded-md p-2 text-muted-foreground/50 opacity-0 pointer-events-none transition-[color,background-color,opacity] group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+                              title="移除已保存账号"
+                              aria-label={`移除${item.description || "未命名账号"}`}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
-                            <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600 group-hover:text-emerald-500 transition-colors" />
-                          </div>
-                        )}
                       </div>
                     );
                   })}
+                  </div>
                 </div>
               )}
 
               {/* Add new account */}
               {!loadingHistory && (
-                <button
+                <Button
+                  variant="outline"
                   onClick={() => setViewMode("form")}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:border-emerald-400 dark:hover:border-emerald-600 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all text-sm font-medium"
+                  disabled={loggingInKey !== null}
+                  className="h-10 w-full bg-transparent text-foreground"
                 >
                   <Plus className="w-4 h-4" />
                   添加新账号
-                </button>
+                </Button>
               )}
             </div>
           )}
@@ -320,7 +335,8 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                   onChange={(e) => setAk(e.target.value)}
                   required
                   autoFocus
-                  className="transition-all duration-200 focus:ring-2 focus:ring-emerald-500/50"
+                  className="h-10 bg-background"
+                  disabled={isLoggingIn}
                 />
               </div>
               <div className="space-y-2">
@@ -333,29 +349,32 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                     value={sk}
                     onChange={(e) => setSk(e.target.value)}
                     required
-                    className="pr-10 transition-all duration-200 focus:ring-2 focus:ring-emerald-500/50"
+                    className="h-10 bg-background pr-10"
+                    disabled={isLoggingIn}
                   />
                   <button
                     type="button"
                     onClick={() => setShowSk(v => !v)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
-                    tabIndex={-1}
+                    aria-label={showSk ? "隐藏 SecretKey" : "显示 SecretKey"}
+                    aria-pressed={showSk}
                   >
                     {showSk ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="description">描述（可选）</Label>
+                <Label htmlFor="description">账号名称 <span className="font-normal text-muted-foreground">（可选）</span></Label>
                 <Input
                   id="description"
                   placeholder="如：公司账号、个人账号"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="transition-all duration-200 focus:ring-2 focus:ring-emerald-500/50"
+                  className="h-10 bg-background"
+                  disabled={isLoggingIn}
                 />
               </div>
-              <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 py-1">
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="remember"
@@ -366,101 +385,80 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                     记住凭证
                   </Label>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="autoLogin"
-                    checked={autoLogin}
-                    onCheckedChange={(checked) => {
-                      const value = checked === true;
-                      setAutoLogin(value);
-                      localStorage.setItem('qiniu_auto_login', value.toString());
-                    }}
-                  />
-                  <Label htmlFor="autoLogin" className="text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer">
-                    下次自动登录
-                  </Label>
-                </div>
               </div>
               <Button
                 type="submit"
                 disabled={isLoggingIn || !ak || !sk}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-md hover:shadow-lg py-2.5 text-base cursor-pointer disabled:opacity-60"
+                className="h-10 w-full cursor-pointer"
               >
                 {isLoggingIn ? (
                   <><Loader2 className="w-4 h-4 animate-spin mr-2" />验证中...</>
                 ) : (
-                  <><LogIn className="w-4 h-4 mr-2" />登录并验证</>
+                  <>连接账号<ArrowRight className="size-4" /></>
                 )}
               </Button>
 
-              {/* Import from Kodo */}
-              <div className="text-center pt-1">
-                <button
-                  type="button"
-                  onClick={handleImportFromKodo}
-                  disabled={isImporting}
-                  className="text-sm text-zinc-500 hover:text-zinc-700 hover:underline dark:text-zinc-400 dark:hover:text-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isImporting ? "导入中..." : "从 Kodo Browser 导入凭证"}
-                </button>
-              </div>
-
-              {/* Back to list */}
-              {historyItems.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => { setViewMode("list"); setAk(""); setSk(""); setDescription(""); }}
-                  className="w-full text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors text-center pt-1"
-                >
-                  ← 返回账号列表
-                </button>
-              )}
             </form>
           )}
-        </CardContent>
-
-        <CardFooter className="text-[11px] text-center text-zinc-400 justify-center pt-3 pb-4">
-          您的凭证将安全地存储在本地设备中
-        </CardFooter>
-      </Card>
+        </div>
+        <div className="mt-6 flex justify-center border-t pt-4">
+          <Button type="button" variant="ghost" size="sm" onClick={handleImportFromKodo} disabled={isImporting || isLoggingIn || loggingInKey !== null} className="text-xs font-normal text-muted-foreground">
+            {isImporting ? <Loader2 className="animate-spin" /> : <Import />}
+            {isImporting ? "正在导入…" : "从 Kodo Browser 导入账号"}
+          </Button>
+        </div>
+      </section>
+      </div>
 
       {/* Kodo import dialog */}
-      {showKodoDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-zinc-900 w-full max-w-sm rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-            <div className="p-6">
-              <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-4">从 Kodo Browser 导入</h3>
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {kodoItems.map((item, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleSelectKodoItem(item)}
-                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-zinc-700 dark:text-zinc-200 truncate">
-                        {item.description || item.accessKey.substring(0, 16) + '...'}
-                      </div>
-                      <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono truncate">
-                        {item.accessKey.substring(0, 16)}...
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600 shrink-0" />
-                  </button>
-                ))}
-              </div>
-              <div className="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-700">
-                <button
-                  onClick={() => setShowKodoDialog(false)}
-                  className="w-full text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
-                >
-                  取消
-                </button>
-              </div>
-            </div>
+      <Dialog open={showKodoDialog} onOpenChange={open => { if (!importInFlight.current) setShowKodoDialog(open); }}>
+        <DialogContent showCloseButton={!savingImport}>
+          <DialogHeader>
+            <DialogTitle>从 Kodo Browser 导入</DialogTitle>
+            <DialogDescription>选择要导入的账号。相同 AccessKey 的已保存记录将被更新。</DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <Label className="cursor-pointer gap-2 font-normal">
+              <Checkbox
+                aria-label="全选账号"
+                checked={kodoItems.length > 0 && selectedKodoKeys.size === kodoItems.length}
+                indeterminate={selectedKodoKeys.size > 0 && selectedKodoKeys.size < kodoItems.length}
+                disabled={savingImport}
+                onCheckedChange={checked => setSelectedKodoKeys(checked ? new Set(kodoItems.map(item => item.accessKey)) : new Set())}
+              />
+              全选
+            </Label>
+            <span>已选 {selectedKodoKeys.size} / {kodoItems.length}</span>
           </div>
-        </div>
-      )}
+          <div className="max-h-[min(18rem,40vh)] space-y-1 overflow-y-auto rounded-lg border p-1">
+            {kodoItems.map(item => (
+              <Label key={item.accessKey} className={`flex cursor-pointer items-center gap-3 rounded-md p-2.5 hover:bg-muted ${selectedKodoKeys.has(item.accessKey) ? "bg-primary/5" : ""}`}>
+                <Checkbox
+                  aria-label={`选择${item.description || item.accessKey}`}
+                  checked={selectedKodoKeys.has(item.accessKey)}
+                  disabled={savingImport}
+                  onCheckedChange={checked => setSelectedKodoKeys(previous => {
+                    const next = new Set(previous);
+                    if (checked) next.add(item.accessKey); else next.delete(item.accessKey);
+                    return next;
+                  })}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{item.description || "未命名账号"}</span>
+                  <span className="mt-0.5 block truncate font-mono text-[11px] font-normal text-muted-foreground">{item.accessKey.substring(0, 16)}…</span>
+                </span>
+                {historyItems.some(saved => saved.accessKey === item.accessKey) && <span className="shrink-0 text-[11px] font-normal text-muted-foreground">已保存</span>}
+              </Label>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={savingImport} onClick={() => setShowKodoDialog(false)}>取消</Button>
+            <Button disabled={savingImport || selectedKodoKeys.size === 0} onClick={handleImportSelected}>
+              {savingImport ? <><Loader2 className="animate-spin" />正在导入…</> : "导入所选"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

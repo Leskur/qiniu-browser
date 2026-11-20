@@ -9,7 +9,7 @@ export interface TransferTask {
   totalSize: number;
   transferredSize: number;
   progress: number;
-  status: 'pending' | 'transferring' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'transferring' | 'completed' | 'failed' | 'cancelled' | 'skipped';
   error?: string;
   startTime: number;
   endTime?: number;

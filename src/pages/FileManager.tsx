@@ -1,3 +1,4 @@
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchFiles, fetchBucketDomains, QiniuFile, deleteFile, deleteDirectory, generateDownloadUrl, batchDeleteFiles, renameFile, createFolder } from "../lib/qiniu";
@@ -147,10 +148,21 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     hasMore: boolean;
     timestamp: number;
   }>>(new Map());
+
+  // 清理只影响缓存，当前展示的数据和登录、书签等偏好保持不变。
+  useEffect(() => useAppStore.subscribe((state, previous) => {
+    if (state.cacheVersion !== previous.cacheVersion) dirCache.current.clear();
+  }), []);
+
   
   // Get cache expire time from settings
   const { cacheExpireMinutes, itemsPerPage } = useAppStore();
   const CACHE_TTL = cacheExpireMinutes * 60 * 1000;
+
+  // 账号、空间或每页数量变化后，旧列表不能继续用于当前请求。
+  useEffect(() => {
+    dirCache.current.clear();
+  }, [ak, sk, bucket, itemsPerPage]);
   
   // Refresh throttle to prevent excessive API calls
   const [lastRefreshTime, setLastRefreshTime] = useState(0);
@@ -280,10 +292,11 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
         return;
       }
 
-      const terminal = status === 'completed' || status === 'failed' || status === 'cancelled';
+      const terminal = status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'skipped';
       const mappedStatus =
         status === 'completed' ? 'completed'
         : status === 'failed' ? 'failed'
+        : status === 'skipped' ? 'skipped'
         : status === 'cancelled' ? 'cancelled'
         : 'transferring';
       schedulePatch(frontendId, {
@@ -475,28 +488,40 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     };
   }, [ak, sk, bucket, currentPrefix]);
 
+  const [uploadChoice, setUploadChoice] = useState<{ count: number; resolve: (value: string | null) => void } | null>(null);
+  const [conflictPolicy, setConflictPolicy] = useState("skip");
+  const uploadPending = useRef(false);
+  useEffect(() => () => { uploadPending.current = false; }, []);
+  const finishUploadChoice = (value: string | null) => {
+    uploadChoice?.resolve(value);
+    setUploadChoice(null);
+  };
   const handleUploadPaths = async (paths: string[], relativePaths?: string[]) => {
-    if (paths.length === 0) return;
+    if (paths.length === 0 || uploadPending.current) return;
+    uploadPending.current = true;
+    const policy = await new Promise<string | null>(resolve => setUploadChoice({count: paths.length, resolve}));
+    if (!policy) { uploadPending.current = false; return; }
     setIsUploading(true);
     setPanelOpen(true); // Open transfer panel
     
     try {
-      const result: { uploaded: string[]; failed: string[] } = await invoke('upload_files', {
+      const result: { uploaded: string[]; failed: string[]; skipped: string[] } = await invoke('upload_files', {
         ak, sk, bucket,
         filePaths: paths,
         prefix: currentPrefix,
         relativePaths: relativePaths ?? null,
+        conflictPolicy: policy,
       });
       
-      // Only show toast for failures, progress panel shows success
-      if (result.failed.length > 0) {
-        toast.warning('部分文件上传失败', { description: `成功 ${result.uploaded.length} 个，失败 ${result.failed.length} 个` });
-      }
+      const summary = `成功 ${result.uploaded.length} 个，跳过 ${result.skipped.length} 个，失败 ${result.failed.length} 个`;
+      if (result.failed.length > 0) toast.warning('上传结束，部分文件失败', { description: summary });
+      else toast.success('上传结束', { description: summary });
       loadDirectory(currentPrefix, true);
     } catch (err: any) {
       toast.error('上传失败', { description: String(err) });
     } finally {
       setIsUploading(false);
+      uploadPending.current = false;
     }
   };
 
@@ -1147,6 +1172,17 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-white dark:bg-zinc-950">
+      <Dialog open={uploadChoice !== null} onOpenChange={open => { if (!open) finishUploadChoice(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>上传同名处理</DialogTitle><DialogDescription>本次选择 {uploadChoice?.count} 项。处理方式应用到整批上传，不预先扫描云端文件。</DialogDescription></DialogHeader>
+          <div className="grid gap-3">
+            {[["skip", "跳过同名文件"], ["overwrite", "覆盖同名文件"]].map(([value, label]) => <label key={value} className="flex cursor-pointer items-center gap-2 text-sm"><input type="radio" name="upload-conflict" value={value} checked={conflictPolicy === value} onChange={() => setConflictPolicy(value)} />{label}</label>)}
+            <p className="text-xs text-muted-foreground">跳过会保留云端已有文件；覆盖会替换云端已有内容。</p>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => finishUploadChoice(null)}>取消</Button><Button onClick={() => finishUploadChoice(conflictPolicy)}>开始上传</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       {/* ── Top Bar ── */}
       <div className="relative z-20 shrink-0 border-b border-zinc-200 dark:border-zinc-800">

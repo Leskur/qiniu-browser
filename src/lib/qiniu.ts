@@ -1,15 +1,31 @@
 import CryptoJS from "crypto-js";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
+import { invoke } from "@tauri-apps/api/core";
+
+// 七牛使用 612、614 等状态码，不能通过浏览器 Response 构造器包装。
+type QiniuResponse = Pick<Response, 'status' | 'ok' | 'json' | 'text'>;
 
 /**
  * 带日志的 fetch 封装
  * 自动记录请求方法、URL、状态码和耗时
  */
-export async function loggedFetch(url: string, options: RequestInit): Promise<Response> {
+export async function loggedFetch(url: string, options: RequestInit): Promise<QiniuResponse> {
   const method = options.method || "GET";
   const start = performance.now();
   try {
-    const response = await tauriFetch(url, options);
+    const request = new Request(url, options);
+    const body = await request.arrayBuffer();
+    const result = await invoke<{ status: number; body: string }>('qiniu_api_request', {
+      url: request.url,
+      method: request.method,
+      headers: Array.from(request.headers.entries()),
+      body: body.byteLength ? Array.from(new Uint8Array(body)) : null,
+    });
+    const response: QiniuResponse = {
+      status: result.status,
+      ok: result.status >= 200 && result.status < 300,
+      json: async () => JSON.parse(result.body),
+      text: async () => result.body,
+    };
     const duration = (performance.now() - start).toFixed(0);
     console.log(`[HTTP] ${method} ${url} → ${response.status} (${duration}ms)`);
     return response;
@@ -78,7 +94,7 @@ export interface QiniuBucket {
 /**
  * 获取用户的存储空间 (Bucket) 列表
  */
-async function parseQiniuError(response: Response, fallback: string): Promise<Error> {
+async function parseQiniuError(response: QiniuResponse, fallback: string): Promise<Error> {
   try {
     const data = await response.json();
     return new Error(data?.error || `${fallback}: ${response.status}`);
@@ -398,13 +414,14 @@ export async function renameFile(
   const host = "rs.qiniuapi.com";
   const srcEntry = urlSafeBase64Encode(`${bucket}:${oldKey}`);
   const dstEntry = urlSafeBase64Encode(`${bucket}:${newKey}`);
-  const path = `/move/${srcEntry}/${dstEntry}/force/true`;
+  const path = `/move/${srcEntry}/${dstEntry}/force/false`;
   const url = `https://${host}${path}`;
   const token = generateQiniuToken(ak, sk, "POST", path, host, "application/x-www-form-urlencoded");
   const response = await loggedFetch(url, {
     method: "POST",
     headers: { Authorization: token, "Content-Type": "application/x-www-form-urlencoded" },
   });
+  if (response.status === 614) throw new Error("目标文件已存在，请使用其他名称");
   if (!response.ok) throw await parseQiniuError(response, "重命名失败");
 }
 

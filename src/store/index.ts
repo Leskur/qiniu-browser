@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { isTauri } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { QiniuBucket, fetchBuckets } from '../lib/qiniu'
 
 export type Theme = 'light' | 'dark' | 'system';
@@ -35,6 +37,8 @@ interface AppState {
   // 缓存设置
   cacheExpireMinutes: number;
   setCacheExpireMinutes: (minutes: number) => void;
+  cacheVersion: number;
+  clearCaches: () => void;
   
   // 域名缓存
   bucketDomains: Map<string, { domains: string[]; timestamp: number }>;
@@ -54,7 +58,7 @@ interface AppState {
 }
 
 /**
- * 将 theme 应用到 <html> 元素
+ * 同步页面和原生窗口主题。
  */
 function applyThemeToDOM(theme: Theme) {
   const root = document.documentElement;
@@ -70,6 +74,11 @@ function applyThemeToDOM(theme: Theme) {
     } else {
       root.classList.remove('dark');
     }
+  }
+  root.style.colorScheme = root.classList.contains('dark') ? 'dark' : 'light';
+  if (isTauri()) {
+    getCurrentWindow().setTheme(theme === 'system' ? null : theme)
+      .catch(error => console.error('同步窗口主题失败:', error));
   }
 }
 
@@ -131,6 +140,11 @@ export const useAppStore = create<AppState>()(
       // 缓存设置
       cacheExpireMinutes: 5,
       setCacheExpireMinutes: (minutes) => set({ cacheExpireMinutes: minutes }),
+      cacheVersion: 0,
+      clearCaches: () => set(state => ({
+        bucketDomains: new Map(),
+        cacheVersion: state.cacheVersion + 1,
+      })),
       
       // 域名缓存（1小时过期）
       bucketDomains: new Map(),
@@ -232,5 +246,7 @@ if (typeof window !== 'undefined') {
     } catch {
       applyThemeToDOM('system');
     }
+  } else {
+    applyThemeToDOM('system');
   }
 }
