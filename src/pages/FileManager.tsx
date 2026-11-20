@@ -1,3 +1,4 @@
+import { createUploadRetry } from "../lib/upload-retry";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -237,6 +238,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   const [newFolderName, setNewFolderName] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   
+  const uploadPolicyRef = useRef("skip");
   // ── Listen to upload/download progress events ──
   useEffect(() => {
     const taskMap = new Map<string, string>(); // backend task_id -> frontend task id
@@ -266,6 +268,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     };
 
     const ensureTask = (task_id: string, type: 'upload' | 'download', fileName: string, totalSize: number) => {
+      if (useTransferStore.getState().tasksById[task_id]) return task_id;
       let frontendId = taskMap.get(task_id);
       if (!frontendId) {
         frontendId = addTask({ type, fileName, totalSize });
@@ -284,8 +287,14 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
       status: string;
       error?: string;
     }>('upload-progress', (event) => {
-      const { task_id, file_name, total_size, uploaded_size, progress, status, error } = event.payload;
+      const { task_id, file_name, file_path, total_size, uploaded_size, progress, status, error } = event.payload;
       const frontendId = ensureTask(task_id, 'upload', file_name, total_size);
+      if (!useTransferStore.getState().tasksById[frontendId]?.retry) {
+        useTransferStore.getState().updateTask(frontendId, {
+          filePath: file_path,
+          retry: createUploadRetry(frontendId, { ak, sk, bucket, filePath: file_path, key: file_name, conflictPolicy: uploadPolicyRef.current }),
+        });
+      }
       // 已取消：忽略迟到进度；若实际上传已完成则仍记成功
       const existing = useTransferStore.getState().tasksById[frontendId];
       if (existing?.status === 'cancelled' && status !== 'completed' && status !== 'cancelled') {
@@ -501,6 +510,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     uploadPending.current = true;
     const policy = await new Promise<string | null>(resolve => setUploadChoice({count: paths.length, resolve}));
     if (!policy) { uploadPending.current = false; return; }
+    uploadPolicyRef.current = policy;
     setIsUploading(true);
     setPanelOpen(true); // Open transfer panel
     

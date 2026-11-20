@@ -6,6 +6,7 @@ export interface TransferTask {
   fileName: string;
   filePath?: string;
   url?: string;
+  retry?: () => Promise<void>;
   totalSize: number;
   transferredSize: number;
   progress: number;

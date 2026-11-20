@@ -362,6 +362,7 @@ async fn upload_files(
     prefix: String,
     relative_paths: Option<Vec<String>>,
     conflict_policy: Option<String>,
+    task_ids: Option<Vec<String>>,
 ) -> Result<UploadResult, String> {
     info!("上传开始: bucket={}, prefix={}, files={}", bucket, prefix, file_paths.len());
     let policy = conflict_policy.unwrap_or_else(|| "skip".into());
@@ -383,14 +384,14 @@ async fn upload_files(
         let skipped: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let cancelled: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-        files.par_iter().for_each(|(path, key)| {
+        files.par_iter().enumerate().for_each(|(index, (path, key))| {
             // 尚未开始的任务：直接跳过，不创建前端条目
             if UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
                 cancelled.lock().unwrap().push(key.clone());
                 return;
             }
 
-            let task_id = uuid::Uuid::new_v4().to_string();
+            let task_id = task_ids.as_ref().and_then(|ids| ids.get(index)).cloned().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             let file_name = key.clone();
             let file_path = path.to_string_lossy().to_string();
             

@@ -1,9 +1,10 @@
+import { retryFailedUploads, uploadsActive } from "../lib/upload-retry";
 import { memo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useShallow } from "zustand/react/shallow";
 import { invoke } from "@tauri-apps/api/core";
 import { useTransferStore, TransferTask } from "../store/transfer";
-import { X, ChevronDown, ChevronUp, Upload, Download, Check, AlertCircle, Trash2, Loader2, Square } from "lucide-react";
+import { X, ChevronDown, ChevronUp, Upload, Download, Check, AlertCircle, Trash2, Loader2, Square, RotateCw } from "lucide-react";
 import { formatBytes } from "../lib/utils";
 import { toast } from "@/lib/toast";
 
@@ -24,6 +25,7 @@ const ROW_HEIGHT = 72;
 const TaskItem = memo(function TaskItem({ taskId }: { taskId: string }) {
   const task = useTransferStore((s) => s.tasksById[taskId]);
   const removeTask = useTransferStore((s) => s.removeTask);
+  const uploadBusy = useTransferStore(s => Object.values(s.tasksById).some(t => t.type === "upload" && (t.status === "pending" || t.status === "transferring")));
 
   if (!task) return null;
 
@@ -32,6 +34,7 @@ const TaskItem = memo(function TaskItem({ taskId }: { taskId: string }) {
   return (
     <TaskItemView
       task={task}
+      onRetry={task.status === "failed" && task.retry && !uploadBusy ? () => { void task.retry?.(); } : undefined}
       onRemove={isActive ? undefined : () => removeTask(task.id)}
     />
   );
@@ -40,9 +43,11 @@ const TaskItem = memo(function TaskItem({ taskId }: { taskId: string }) {
 const TaskItemView = memo(function TaskItemView({
   task,
   onRemove,
+  onRetry,
 }: {
   task: TransferTask;
   onRemove?: () => void;
+  onRetry?: () => void;
 }) {
   const Icon = task.type === 'upload' ? Upload : Download;
   const StatusIcon = task.status === 'completed' ? Check
@@ -123,6 +128,7 @@ const TaskItemView = memo(function TaskItemView({
           )}
         </div>
 
+        {onRetry && <button onClick={onRetry} title="重试上传" aria-label={`重试上传 ${task.fileName}`} className="shrink-0 rounded p-1 text-emerald-600 hover:bg-emerald-50"><RotateCw className="size-4" /></button>}
         {onRemove && (
           <button
             onClick={onRemove}
@@ -147,7 +153,7 @@ export function TransferPanel() {
   const cancelActiveUploads = useTransferStore((s) => s.cancelActiveUploads);
   const [stopping, setStopping] = useState(false);
   const summary = useTransferStore(useShallow((s) => {
-    let active = 0, completed = 0, failed = 0;
+    let active = 0, completed = 0, failed = 0, retryable = 0;
     let uploadCount = 0, uploadDone = 0, uploadFailed = 0;
     let uploadTotal = 0, uploadTransferred = 0;
     let uploadActive = 0;
@@ -160,6 +166,7 @@ export function TransferPanel() {
       else if (t.status === 'failed') failed++;
 
       if (t.type !== 'upload') continue;
+      if (t.status === 'failed' && t.retry) retryable++;
       uploadCount++;
       uploadTotal += Math.max(0, t.totalSize || 0);
       if (t.status === 'completed') {
@@ -182,6 +189,7 @@ export function TransferPanel() {
 
     return {
       active,
+      retryable,
       completed,
       failed,
       uploadCount,
@@ -248,6 +256,7 @@ export function TransferPanel() {
         </div>
 
         <div className="flex items-center gap-1">
+          {summary.retryable > 0 && summary.uploadActive === 0 && <button title="重试全部失败上传" aria-label="重试全部失败上传" onClick={() => { if (!uploadsActive()) void retryFailedUploads(); }} className="rounded p-1.5 text-emerald-600 hover:bg-emerald-50"><RotateCw className="size-4" /></button>}
           {summary.uploadActive > 0 && (
             <button
               onClick={handleStopAll}
