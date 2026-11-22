@@ -1,9 +1,12 @@
 use std::fs;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-/// 全局上传取消标志：true 时跳过未开始文件，并中断进行中的上传
-static UPLOAD_CANCEL_FLAG: AtomicBool = AtomicBool::new(false);
+// A stop request invalidates the generation captured by each active batch.
+static UPLOAD_CANCEL_GENERATION: AtomicU64 = AtomicU64::new(0);
+const MAX_CONCURRENT_UPLOAD_FILES: usize = 10;
+const MAX_CONCURRENT_UPLOAD_PARTS: usize = 5;
 
 #[derive(serde::Serialize)]
 struct QiniuApiResponse {
@@ -94,7 +97,7 @@ fn greet(name: &str) -> String {
 
 #[tauri::command]
 fn cancel_uploads() {
-    UPLOAD_CANCEL_FLAG.store(true, Ordering::SeqCst);
+    UPLOAD_CANCEL_GENERATION.fetch_add(1, Ordering::SeqCst);
     info!("收到停止全部上传请求");
 }
 
@@ -264,7 +267,12 @@ fn delete_history(access_key: String) -> Result<(), String> {
 }
 
 use qiniu_sdk::credential::Credential;
-use qiniu_sdk::upload::{UploadManager, UploadTokenSigner, AutoUploaderObjectParams, AutoUploader, UploaderWithCallbacks};
+use qiniu_sdk::http_client::ResponseErrorKind;
+use qiniu_sdk::objects::ObjectsManager;
+use qiniu_sdk::upload::{
+    AutoUploader, AutoUploaderObjectParams, FixedConcurrencyProvider, UploadManager,
+    UploadTokenSigner, UploaderWithCallbacks,
+};
 use std::time::Duration;
 use rayon::prelude::*;
 use std::sync::Mutex;
@@ -333,6 +341,33 @@ struct UploadProgressEvent {
     error: Option<String>,
 }
 
+#[derive(serde::Serialize)]
+struct UploadEntry {
+    path: String,
+    key: String,
+    size: u64,
+}
+
+#[tauri::command]
+async fn prepare_uploads(
+    file_paths: Vec<String>,
+    prefix: String,
+    relative_paths: Option<Vec<String>>,
+) -> Result<Vec<UploadEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        collect_files(file_paths, &prefix, relative_paths)
+            .into_iter()
+            .map(|(path, key)| UploadEntry {
+                size: fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0),
+                path: path.to_string_lossy().into_owned(),
+                key,
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
 #[derive(serde::Serialize, Clone)]
 struct DownloadProgressEvent {
     task_id: String,
@@ -350,6 +385,7 @@ struct UploadResult {
     skipped: Vec<String>,
     uploaded: Vec<String>,
     failed: Vec<String>,
+    cancelled: usize,
 }
 
 #[tauri::command]
@@ -367,9 +403,19 @@ async fn upload_files(
     info!("上传开始: bucket={}, prefix={}, files={}", bucket, prefix, file_paths.len());
     let policy = conflict_policy.unwrap_or_else(|| "skip".into());
     if !["skip", "overwrite"].contains(&policy.as_str()) { return Err("无效的同名处理策略".into()); }
-    UPLOAD_CANCEL_FLAG.store(false, Ordering::SeqCst);
+    let generation = UPLOAD_CANCEL_GENERATION.load(Ordering::SeqCst);
     let app_clone = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        static UPLOAD_POOL: std::sync::OnceLock<Result<rayon::ThreadPool, rayon::ThreadPoolBuildError>> =
+            std::sync::OnceLock::new();
+        let pool = UPLOAD_POOL.get_or_init(|| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(MAX_CONCURRENT_UPLOAD_FILES)
+                .build()
+        }).as_ref().map_err(|error| format!("无法启动上传线程池: {error}"))?;
+        let is_cancelled = move || UPLOAD_CANCEL_GENERATION.load(Ordering::SeqCst) != generation;
+        let preflight_bucket = (policy == "skip")
+            .then(|| ObjectsManager::new(Credential::new(&ak, &sk)).bucket(bucket.clone()));
         let upload_manager = UploadManager::builder(
             UploadTokenSigner::new_credential_provider_builder(
                 Credential::new(&ak, &sk),
@@ -377,6 +423,11 @@ async fn upload_files(
                 Duration::from_secs(3600),
             ).on_policy_generated({ let overwrite = policy == "overwrite"; move |builder| { if !overwrite { builder.insert_only(); } Ok(()) } }).build()
         ).build();
+        let mut uploader_builder = upload_manager.auto_uploader_builder();
+        uploader_builder.concurrency_provider(
+            FixedConcurrencyProvider::new(MAX_CONCURRENT_UPLOAD_PARTS)
+                .expect("Upload part concurrency must be positive"),
+        );
 
         let files = collect_files(file_paths, &prefix, relative_paths);
         let uploaded: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -384,14 +435,23 @@ async fn upload_files(
         let skipped: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let cancelled: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-        files.par_iter().enumerate().for_each(|(index, (path, key))| {
-            // 尚未开始的任务：直接跳过，不创建前端条目
-            if UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
+        let upload_file = |(index, (path, key)): (usize, &(PathBuf, String))| {
+            let task_id = task_ids.as_ref().and_then(|ids| ids.get(index)).cloned().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            if is_cancelled() {
                 cancelled.lock().unwrap().push(key.clone());
+                let _ = app_clone.emit("upload-progress", UploadProgressEvent {
+                    task_id,
+                    file_name: key.clone(),
+                    file_path: path.to_string_lossy().into_owned(),
+                    total_size: 0,
+                    uploaded_size: 0,
+                    progress: 0.0,
+                    status: "cancelled".into(),
+                    error: Some("已停止".into()),
+                });
                 return;
             }
 
-            let task_id = task_ids.as_ref().and_then(|ids| ids.get(index)).cloned().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             let file_name = key.clone();
             let file_path = path.to_string_lossy().to_string();
             
@@ -411,7 +471,7 @@ async fn upload_files(
             });
 
             // 发出开始事件后再次检查，避免刚创建的任务继续跑
-            if UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
+            if is_cancelled() {
                 cancelled.lock().unwrap().push(key.clone());
                 let _ = app_clone.emit("upload-progress", UploadProgressEvent {
                     task_id,
@@ -426,8 +486,7 @@ async fn upload_files(
                 return;
             }
 
-            // 默认 AutoUploader（SHA1），与七牛文档一致，断点记录才能对上
-            let mut auto_uploader: AutoUploader = upload_manager.auto_uploader();
+            let mut auto_uploader: AutoUploader = uploader_builder.build();
 
             // Register progress callback（节流：≥200ms 或进度变化 ≥1%；取消时返回 Err 中断）
             let app_progress = app_clone.clone();
@@ -436,7 +495,7 @@ async fn upload_files(
             let file_path_progress = file_path.clone();
             let last_emit = std::sync::Mutex::new((std::time::Instant::now() - std::time::Duration::from_secs(1), -1.0f64));
             auto_uploader.on_upload_progress(move |info| {
-                if UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
+                if is_cancelled() {
                     return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "upload cancelled").into());
                 }
                 let uploaded = info.transferred_bytes();
@@ -474,21 +533,57 @@ async fn upload_files(
                     .file_name(target.to_string())
                     .build()
             };
-            // 大文件中断后，再执行一次同样的上传，SDK 会按断点记录接着传
-            let is_conflict = |error: &qiniu_sdk::http_client::ResponseError| matches!(error.kind(), qiniu_sdk::http_client::ResponseErrorKind::StatusCodeError(code) if code.as_u16() == 614);
             let target = key.clone();
-            let mut upload_result = auto_uploader.upload_path(path, upload_params(&target));
-            if upload_result.as_ref().err().is_some_and(|e| !is_conflict(e)) && !UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
-                upload_result = auto_uploader.upload_path(path, upload_params(&target));
-            }
-            if policy == "skip" && upload_result.as_ref().err().is_some_and(|e| is_conflict(e)) && !UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
+            let is_conflict = |error: &qiniu_sdk::http_client::ResponseError| {
+                matches!(error.kind(), ResponseErrorKind::StatusCodeError(code) if code.as_u16() == 614)
+            };
+            let upload = |attempt| {
+                let result = auto_uploader.upload_path(path, upload_params(&target));
+                match &result {
+                    Ok(body) => info!(
+                        "七牛上传响应: key={:?}, policy={}, attempt={}, result=Ok, body={}",
+                        target, policy, attempt, body
+                    ),
+                    Err(error) => info!(
+                        "七牛上传响应: key={:?}, policy={}, attempt={}, result=Err, kind={:?}, error={}",
+                        target, policy, attempt, error.kind(), error
+                    ),
+                }
+                result
+            };
+            let upload_result = (|| {
+                if let Some(bucket) = &preflight_bucket {
+                    match bucket.stat_object(&target).call() {
+                        Ok(_) => return Ok(None),
+                        Err(error) if matches!(
+                            error.kind(),
+                            ResponseErrorKind::StatusCodeError(code) if code.as_u16() == 612
+                        ) => {}
+                        Err(error) => return Err(format!("同名预检失败: {error}")),
+                    }
+                }
+                if is_cancelled() {
+                    return Err("已停止".into());
+                }
+
+                let mut result = upload(1);
+                if result.as_ref().err().is_some_and(|error| !is_conflict(error)) && !is_cancelled() {
+                    result = upload(2);
+                }
+                if policy == "skip" && result.as_ref().err().is_some_and(is_conflict) {
+                    return Ok(None);
+                }
+                result.map(Some).map_err(|error| error.to_string())
+            })();
+            if matches!(upload_result, Ok(None)) && !is_cancelled() {
+                info!("同名文件已跳过: {}", key);
                 skipped.lock().unwrap().push(key.clone());
                 let _ = app_clone.emit("upload-progress", UploadProgressEvent { task_id, file_name, file_path, total_size, uploaded_size: 0, progress: 0.0, status: "skipped".into(), error: Some("同名文件已跳过".into()) });
                 return;
             }
 
             match upload_result {
-                Ok(_) => {
+                Ok(Some(_)) => {
                     // 极端情况下完成瞬间才取消，仍记为成功
                     info!("上传成功: {}", key);
                     uploaded.lock().unwrap().push(target.clone());
@@ -503,8 +598,8 @@ async fn upload_files(
                         error: None,
                     });
                 },
-                Err(e) => {
-                    if UPLOAD_CANCEL_FLAG.load(Ordering::SeqCst) {
+                result => {
+                    if is_cancelled() {
                         info!("上传已取消: {}", key);
                         cancelled.lock().unwrap().push(key.clone());
                         let _ = app_clone.emit("upload-progress", UploadProgressEvent {
@@ -517,7 +612,7 @@ async fn upload_files(
                             status: "cancelled".to_string(),
                             error: Some("已停止".to_string()),
                         });
-                    } else {
+                    } else if let Err(e) = result {
                         error!("上传失败: {} - {}", key, e);
                         let error_msg = format!("{}: {}", key, e);
                         failed.lock().unwrap().push(error_msg.clone());
@@ -534,7 +629,8 @@ async fn upload_files(
                     }
                 },
             }
-        });
+        };
+        pool.install(|| files.par_iter().enumerate().for_each(upload_file));
 
         let cancelled_count = cancelled.into_inner().unwrap().len();
         if cancelled_count > 0 {
@@ -542,6 +638,7 @@ async fn upload_files(
         }
 
         Ok(UploadResult {
+            cancelled: cancelled_count,
             skipped: skipped.into_inner().unwrap(),
             uploaded: uploaded.into_inner().unwrap(),
             failed: failed.into_inner().unwrap(),
@@ -555,26 +652,111 @@ struct DownloadResult {
     failed: Vec<String>,
 }
 
+fn batch_download_path(root: &Path, name: &str) -> Result<PathBuf, String> {
+    // Object keys use forward slashes. Reject platform-specific separators and prefixes.
+    if name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+        || name.contains(['\\', ':'])
+    {
+        return Err("无效的下载相对路径".into());
+    }
+    let mut components = Path::new(name).components().peekable();
+    let mut parent = root.to_path_buf();
+    while let Some(component) = components.next() {
+        let Component::Normal(segment) = component else {
+            return Err("无效的下载相对路径".into());
+        };
+        if cfg!(windows) && segment.to_string_lossy().ends_with([' ', '.']) {
+            return Err("Windows 文件名不能以空格或句点结尾".into());
+        }
+        let next = parent.join(segment);
+        if components.peek().is_none() {
+            return Ok(next);
+        }
+        match fs::create_dir(&next) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        parent = fs::canonicalize(next).map_err(|error| error.to_string())?;
+        if !parent.starts_with(root) || !parent.is_dir() {
+            return Err("下载路径超出所选目录或不是文件夹".into());
+        }
+    }
+    Err("无效的下载相对路径".into())
+}
+
+fn write_new_download(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+    let result = file.write_all(bytes);
+    drop(file);
+    if result.is_err() {
+        let _ = fs::remove_file(path);
+    }
+    result
+}
+
+#[cfg(test)]
+mod batch_download_tests {
+    use super::*;
+
+    #[test]
+    fn download_rejects_paths_outside_the_destination() {
+        let root = std::env::temp_dir();
+        for name in ["../outside.txt", "/absolute.txt", "nested/../other.txt", "nested\\other.txt", "file.txt:stream"] {
+            assert!(batch_download_path(&root, name).is_err(), "{name}");
+        }
+    }
+
+    #[test]
+    fn download_creates_nested_files_without_overwriting() {
+        let dir = std::env::temp_dir().join(format!("qiniu-download-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let root = fs::canonicalize(&dir).unwrap();
+        let path = batch_download_path(&root, "folder/file.txt").unwrap();
+        assert_eq!(path, root.join("folder").join("file.txt"));
+        write_new_download(&path, b"original").unwrap();
+        assert_eq!(
+            write_new_download(&path, b"replacement").unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(root.join("folder")).unwrap();
+        fs::remove_dir(root).unwrap();
+    }
+}
+
 #[tauri::command]
 async fn download_files_to_dir(
     app: AppHandle,
     items: Vec<(String, String)>, // (url, filename)
     dir: String,
+    task_ids: Vec<String>,
 ) -> Result<DownloadResult, String> {
+    if items.len() != task_ids.len() {
+        return Err("下载文件与任务数量不一致".into());
+    }
     info!("批量下载开始: dir={}, files={}", dir, items.len());
     use std::sync::Arc;
-    let dir_path = PathBuf::from(dir);
+    let dir_path = fs::canonicalize(dir).map_err(|error| error.to_string())?;
+    if !dir_path.is_dir() {
+        return Err("所选下载位置不是文件夹".into());
+    }
+    let client = reqwest::Client::new();
+    let concurrency = Arc::new(tokio::sync::Semaphore::new(8));
     let downloaded = Arc::new(Mutex::new(Vec::<String>::new()));
     let failed = Arc::new(Mutex::new(Vec::<String>::new()));
 
-    let handles: Vec<_> = items.into_iter().map(|(url, filename)| {
-        let save_path = dir_path.join(&filename);
+    let handles: Vec<_> = items.into_iter().zip(task_ids).map(|((url, filename), task_id)| {
+        let root = dir_path.clone();
+        let client = client.clone();
+        let concurrency = Arc::clone(&concurrency);
         let dl = Arc::clone(&downloaded);
         let fl = Arc::clone(&failed);
         let app_clone = app.clone();
-        let task_id = uuid::Uuid::new_v4().to_string();
         
         tokio::spawn(async move {
+            let _permit = concurrency.acquire().await.expect("download semaphore stays open");
             // Emit start event
             let _ = app_clone.emit("download-progress", DownloadProgressEvent {
                 task_id: task_id.clone(),
@@ -587,7 +769,7 @@ async fn download_files_to_dir(
                 error: None,
             });
             
-            match reqwest::get(&url).await {
+            match client.get(&url).send().await {
                 Ok(resp) if resp.status().is_success() => {
                     let total_size = resp.content_length().unwrap_or(0);
                     match resp.bytes().await {
@@ -595,25 +777,20 @@ async fn download_files_to_dir(
                             let downloaded_size = bytes.len() as u64;
                             
                             // Create parent directories if they don't exist
-                            if let Some(parent) = save_path.parent() {
-                                if let Err(e) = fs::create_dir_all(parent) {
-                                    let error_msg = format!("{}: {}", filename, e);
-                                    fl.lock().unwrap().push(error_msg.clone());
-                                    let _ = app_clone.emit("download-progress", DownloadProgressEvent {
-                                        task_id,
-                                        file_name: filename,
-                                        url,
-                                        total_size,
-                                        downloaded_size: 0,
-                                        progress: 0.0,
-                                        status: "failed".to_string(),
-                                        error: Some(error_msg),
-                                    });
-                                    return;
+                            let saved = tauri::async_runtime::spawn_blocking({
+                                let filename = filename.clone();
+                                move || {
+                                    let path = batch_download_path(&root, &filename)?;
+                                    write_new_download(&path, &bytes).map_err(|error| {
+                                        if error.kind() == std::io::ErrorKind::AlreadyExists {
+                                            "目标文件已存在，未覆盖".into()
+                                        } else {
+                                            error.to_string()
+                                        }
+                                    })
                                 }
-                            }
-                            
-                            match fs::write(&save_path, &bytes) {
+                            }).await.unwrap_or_else(|error| Err(error.to_string()));
+                            match saved {
                                 Ok(_) => {
                                     dl.lock().unwrap().push(filename.clone());
                                     // Emit success event
@@ -692,7 +869,15 @@ async fn download_files_to_dir(
         })
     }).collect();
 
-    for h in handles { let _ = h.await; }
+    let mut join_error = None;
+    for handle in handles {
+        if let Err(error) = handle.await {
+            join_error = Some(error);
+        }
+    }
+    if let Some(error) = join_error {
+        return Err(format!("下载任务异常: {error}"));
+    }
 
     Ok(DownloadResult {
         downloaded: Arc::try_unwrap(downloaded).unwrap().into_inner().unwrap(),
@@ -813,7 +998,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![greet, qiniu_api_request, get_histories, get_kodo_histories, save_history, rename_history, delete_history, upload_files, cancel_uploads, download_file, download_files_to_dir, scan_folder, path_is_dir, classify_paths])
+        .invoke_handler(tauri::generate_handler![greet, qiniu_api_request, get_histories, get_kodo_histories, save_history, rename_history, delete_history, prepare_uploads, upload_files, cancel_uploads, download_file, download_files_to_dir, scan_folder, path_is_dir, classify_paths])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -1,3 +1,7 @@
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useState, useEffect, useRef, useMemo, useCallback, startTransition } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
@@ -90,8 +94,8 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
   }, [scanResult, selectedFiles]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="w-full max-w-2xl mx-4 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+    <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
+      <DialogContent showCloseButton={false} className="max-h-[90vh] gap-0 overflow-y-auto p-0 sm:max-w-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-zinc-800">
           <div className="flex items-center gap-3">
@@ -99,20 +103,20 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
               <Folder className="w-5 h-5 text-amber-600 dark:text-amber-400" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+              <DialogTitle>
                 上传文件夹
-              </h2>
+              </DialogTitle>
               <p className="text-sm text-zinc-500 dark:text-zinc-400 truncate max-w-md">
                 {folderName}
               </p>
             </div>
           </div>
-          <button
+          <Button variant="ghost"
             onClick={onCancel}
-            className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="h-auto p-0 p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
             <X className="w-5 h-5 text-zinc-500" />
-          </button>
+          </Button>
         </div>
 
         {/* Content */}
@@ -140,13 +144,13 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
                     总大小 <strong className="text-zinc-900 dark:text-zinc-100">{formatBytes(scanResult.total_size)}</strong>
                   </span>
                 </div>
-                <button
+                <Button variant="ghost"
                   onClick={toggleAll}
-                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                  className="h-auto p-0 flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                 >
                   {allSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-                  全选
-                </button>
+                  {allSelected ? "取消全选" : "全选"}
+                </Button>
               </div>
 
               {/* Virtualized File List */}
@@ -162,7 +166,7 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
                     const file = files[virtualRow.index];
                     const checked = selectedFiles.has(file.path);
                     return (
-                      <label
+                      <Label
                         key={file.path}
                         className="absolute left-0 w-full flex items-center gap-3 px-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer border-b border-zinc-100 dark:border-zinc-800"
                         style={{
@@ -170,12 +174,7 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
                           transform: `translateY(${virtualRow.start}px)`,
                         }}
                       >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleFile(file.path)}
-                          className="size-4 shrink-0 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500/30"
-                        />
+                        <Checkbox checked={checked} onCheckedChange={() => toggleFile(file.path)} />
                         <File className="w-4 h-4 text-zinc-400 shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
@@ -188,7 +187,7 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
                         <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums shrink-0">
                           {formatBytes(file.size)}
                         </span>
-                      </label>
+                      </Label>
                     );
                   })}
                 </div>
@@ -209,13 +208,13 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
               )}
             </div>
             <div className="flex items-center gap-3">
-              <button
+              <Button variant="ghost"
                 onClick={onCancel}
-                className="px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                className="h-auto p-0 px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg transition-colors"
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button variant="ghost"
                 onClick={() => {
                   const selected = files
                     .filter((f) => selectedFiles.has(f.path))
@@ -223,14 +222,14 @@ export function FolderUploadDialog({ folderPath, onConfirm, onCancel }: FolderUp
                   onConfirm(selected);
                 }}
                 disabled={selectedFiles.size === 0}
-                className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:pointer-events-none rounded-lg transition-colors"
+                className="h-auto p-0 px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:pointer-events-none rounded-lg transition-colors"
               >
                 开始上传
-              </button>
+              </Button>
             </div>
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

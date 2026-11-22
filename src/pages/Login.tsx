@@ -95,13 +95,14 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
     }
   };
 
-  const doLogin = async (loginAk: string, loginSk: string, loginDescription?: string) => {
+  const doLogin = async (loginAk: string, loginSk: string, loginDescription?: string, remember?: () => Promise<boolean>) => {
     try {
       const valid = await validateCredentials(loginAk, loginSk);
       if (!valid) {
         throw new Error("AK/SK 无效，请检查后重试");
       }
-      localStorage.setItem('qiniu_last_login_ak', loginAk);
+      if (!remember || await remember()) localStorage.setItem('qiniu_last_login_ak', loginAk);
+      else localStorage.removeItem('qiniu_last_login_ak');
       onLogin(loginAk, loginSk, loginDescription);
     } catch (err: any) {
       throw new Error(err.message || "AK/SK 无效，请检查后重试");
@@ -126,18 +127,24 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
     if (!ak || !sk) return;
     setIsLoggingIn(true);
     try {
-      if (rememberMe) {
-        await invoke("save_history", {
-          newItem: {
-            endpointType: "public",
-            accessKey: ak,
-            accessSecret: sk,
-            rememberMe: true,
-            description: description,
-          },
-        });
-      }
-      await doLogin(ak, sk, description);
+      await doLogin(ak, sk, description, async () => {
+        if (!rememberMe) return false;
+        try {
+          await invoke("save_history", {
+            newItem: {
+              endpointType: "public",
+              accessKey: ak,
+              accessSecret: sk,
+              rememberMe: true,
+              description,
+            },
+          });
+          return true;
+        } catch {
+          toast.warning("登录成功，但未能保存账号");
+          return false;
+        }
+      });
     } catch (err: any) {
       toast.error("登录失败", { description: err.message });
     } finally {
@@ -269,11 +276,11 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                         key={item.accessKey}
                         className="group flex items-center rounded-lg transition-colors hover:bg-muted/70 focus-within:bg-muted/70"
                       >
-                        <button
+                        <Button variant="ghost"
                           type="button"
                           disabled={loggingInKey !== null}
                           onClick={() => handleSelectHistory(item)}
-                          className="flex h-14 min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
+                          className="h-auto p-0 flex h-14 min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
                         >
                         {/* Avatar */}
                         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-emerald-600/10 bg-emerald-50 text-xs font-semibold text-emerald-700 dark:border-emerald-400/10 dark:bg-emerald-400/10 dark:text-emerald-400">
@@ -290,17 +297,17 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                         {isLoading ? (
                           <Loader2 className="w-4 h-4 animate-spin text-emerald-500 shrink-0" />
                         ) : null}
-                        </button>
-                            <button
+                        </Button>
+                            <Button variant="ghost"
                               type="button"
                               onClick={(e) => handleDeleteHistory(e, item.accessKey)}
                               disabled={loggingInKey !== null}
-                              className="mr-2 rounded-md p-2 text-muted-foreground/50 opacity-0 pointer-events-none transition-[color,background-color,opacity] group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+                              className="h-auto p-0 mr-2 rounded-md p-2 text-muted-foreground/50 opacity-0 pointer-events-none transition-[color,background-color,opacity] group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
                               title="移除已保存账号"
                               aria-label={`移除${item.description || "未命名账号"}`}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            </Button>
                       </div>
                     );
                   })}
@@ -352,15 +359,15 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                     className="h-10 bg-background pr-10"
                     disabled={isLoggingIn}
                   />
-                  <button
+                  <Button variant="ghost"
                     type="button"
                     onClick={() => setShowSk(v => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+                    className="h-auto p-0 absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
                     aria-label={showSk ? "隐藏 SecretKey" : "显示 SecretKey"}
                     aria-pressed={showSk}
                   >
                     {showSk ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+                  </Button>
                 </div>
               </div>
               <div className="space-y-2">

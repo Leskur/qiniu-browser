@@ -91,7 +91,7 @@ try {
   console.log('\n📋 后续步骤：');
   console.log('1. GitHub Actions 将自动构建所有平台的安装包');
   console.log('2. 访问 GitHub Releases 页面查看构建进度');
-  console.log('3. 构建完成后，编辑 Release 说明并发布');
+  console.log('3. 所有平台构建成功后，GitHub Actions 会自动发布正式版');
   console.log(`\n🔗 Release 页面: https://github.com/YOUR_USERNAME/qiniu-browser/releases/tag/v${newVersion}`);
 
 } catch (error) {

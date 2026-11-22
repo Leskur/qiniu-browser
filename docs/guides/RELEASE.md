@@ -88,10 +88,7 @@ git push origin v0.0.2
 
 ## 发布 Release
 
-1. 构建完成后，访问 GitHub 仓库的 [Releases](https://github.com/YOUR_USERNAME/qiniu-browser/releases) 页面
-2. 找到自动创建的草稿 Release
-3. 编辑 Release 说明，添加更新内容
-4. 点击 "Publish release" 发布
+各平台构建期间，安装包上传到草稿。所有平台构建成功后，GitHub Actions 会自动发布正式版。任一平台构建失败时，版本保持草稿状态。发布完成后可在 [Releases](https://github.com/Leskur/qiniu-browser/releases) 查看。
 
 ## 更新日志模板
 
@@ -144,8 +141,7 @@ npm run tauri build
 
 1. 确保三个配置文件的版本号一致
 2. Tag 必须以 `v` 开头，如 `v0.0.2`
-3. 自动创建的 Release 是草稿状态，需要手动发布
-4. 需要仓库的 write 权限才能创建 Release
+3. 需要仓库的 write 权限才能创建 Release
 
 ## 手动触发构建
 
@@ -154,4 +150,4 @@ npm run tauri build
 1. 访问 GitHub Actions 页面
 2. 选择 "Release" workflow
 3. 点击 "Run workflow"
-4. 选择分支并运行
+4. 选择已有的版本 tag（如 `v0.0.2`）并运行

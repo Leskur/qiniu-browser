@@ -3,7 +3,7 @@ import { toast } from "@/lib/toast";
 import { isTauri } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useAppStore, Theme } from "../store";
-import { Palette, LayoutList, Timer, Trash2, Info, MessageSquare } from "lucide-react";
+import { Palette, LayoutList, Timer, Trash2, Info, MessageSquare, ChevronRight, ExternalLink } from "lucide-react";
 import { Button } from "./ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "./ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "./ui/dialog";
@@ -16,10 +16,10 @@ const THEME_ITEMS: { value: Theme; label: string }[] = [
 ];
 
 const PAGE_SIZE_ITEMS = [
-  { value: "20", label: "20" },
-  { value: "50", label: "50" },
-  { value: "100", label: "100" },
-  { value: "200", label: "200" },
+  { value: "20", label: "20 项" },
+  { value: "50", label: "50 项" },
+  { value: "100", label: "100 项" },
+  { value: "200", label: "200 项" },
 ];
 
 const CACHE_EXPIRE_ITEMS = [
@@ -30,7 +30,8 @@ const CACHE_EXPIRE_ITEMS = [
 ];
 
 const rowClass =
-  "flex min-h-11 w-full items-center gap-3 border-b border-zinc-200/70 px-3.5 py-2.5 text-left last:border-b-0 dark:border-zinc-800";
+  "flex min-h-11 w-full items-center gap-3 rounded-none border-b border-zinc-200/70 px-3.5 py-2.5 text-left last:border-b-0 dark:border-zinc-800";
+const rowFocusClass = "focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
 function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -64,9 +65,10 @@ function SettingsSelectRow({
         aria-label={ariaLabel}
         className={cn(
           rowClass,
-          "h-auto rounded-none border-0 border-b bg-transparent px-3.5 shadow-none",
+          rowFocusClass,
+          "h-auto border-0 border-b bg-transparent px-3.5 shadow-none",
           "hover:bg-zinc-100/80 dark:bg-transparent dark:hover:bg-zinc-800/50",
-          "focus-visible:border-transparent focus-visible:ring-0 data-[size=default]:h-auto",
+          "data-[size=default]:h-auto",
           "justify-between gap-3",
         )}
       >
@@ -85,28 +87,32 @@ function SettingsSelectRow({
 
 function SettingsActionRow({
   icon: Icon,
+  trailingIcon: TrailingIcon,
   label,
   value,
   onClick,
 }: {
   icon: typeof Palette;
+  trailingIcon: typeof Palette;
   label: string;
   value: string;
   onClick: () => void;
 }) {
   return (
-    <button
+    <Button variant="ghost"
       type="button"
       onClick={onClick}
       className={cn(
         rowClass,
-        "cursor-pointer transition-colors hover:bg-zinc-100/80 dark:hover:bg-zinc-800/50",
+        rowFocusClass,
+        "h-auto justify-start text-left cursor-pointer transition-colors hover:bg-zinc-100/80 dark:hover:bg-zinc-800/50",
       )}
     >
       <Icon className="size-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
       <span className="min-w-0 flex-1 text-sm text-zinc-800 dark:text-zinc-100">{label}</span>
       <span className="shrink-0 text-sm text-zinc-500 dark:text-zinc-400">{value}</span>
-    </button>
+      <TrailingIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+    </Button>
   );
 }
 
@@ -146,8 +152,8 @@ export function SettingsPanel({ appVersion }: { appVersion: string }) {
           <SettingsSection title="文件浏览">
             <SettingsSelectRow
               icon={LayoutList}
-              label="每页显示"
-              aria-label="每页显示"
+              label="每批加载"
+              aria-label="每批加载"
               items={PAGE_SIZE_ITEMS}
               value={String(itemsPerPage)}
               onValueChange={value => {
@@ -172,6 +178,7 @@ export function SettingsPanel({ appVersion }: { appVersion: string }) {
             />
             <SettingsActionRow
               icon={Trash2}
+              trailingIcon={ChevronRight}
               label="清除缓存"
               value="文件列表与域名"
               onClick={() => setClearOpen(true)}
@@ -181,6 +188,7 @@ export function SettingsPanel({ appVersion }: { appVersion: string }) {
           <SettingsSection title="其他">
             <SettingsActionRow
               icon={MessageSquare}
+              trailingIcon={ExternalLink}
               label="问题反馈"
               value="GitHub Issues"
               onClick={() => {
@@ -194,10 +202,11 @@ export function SettingsPanel({ appVersion }: { appVersion: string }) {
             />
             <div className={rowClass}>
               <Info className="size-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
-              <span className="min-w-0 flex-1 text-sm text-zinc-800 dark:text-zinc-100">关于</span>
+              <span className="min-w-0 flex-1 text-sm text-zinc-800 dark:text-zinc-100">应用版本</span>
               <span className="shrink-0 text-sm text-zinc-500 dark:text-zinc-400">
-                Qiniu Browser · v{appVersion}
+                {appVersion === "未知" ? appVersion : `v${appVersion}`}
               </span>
+              <span aria-hidden="true" className="size-4 shrink-0" />
             </div>
           </SettingsSection>
         </div>

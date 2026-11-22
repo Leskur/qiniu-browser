@@ -8,6 +8,7 @@ on:
 
 jobs:
   release:
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     permissions:
       contents: write
     strategy:
@@ -67,3 +68,16 @@ jobs:
           args: ${{ matrix.platform == 'macos-latest' && format('{0} --bundles app,dmg', matrix.args) || matrix.args }}
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+
+  publish:
+    name: Publish stable release
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft=false --prerelease=false

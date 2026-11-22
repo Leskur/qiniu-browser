@@ -17,12 +17,15 @@ export interface TransferTask {
   speed?: number; // bytes per second
 }
 
+type NewTask = Omit<TransferTask, 'id' | 'startTime' | 'status' | 'progress' | 'transferredSize'>;
+
 interface TransferStore {
   tasksById: Record<string, TransferTask>;
   taskIds: string[];
   isPanelOpen: boolean;
 
-  addTask: (task: Omit<TransferTask, 'id' | 'startTime' | 'status' | 'progress' | 'transferredSize'>) => string;
+  addTask: (task: NewTask) => string;
+  addTasks: (tasks: NewTask[]) => string[];
   updateTask: (id: string, updates: Partial<TransferTask>) => void;
   /** 合并多次进度更新，只触发一次 set */
   batchUpdateTasks: (updates: Map<string, Partial<TransferTask>>) => void;
@@ -37,26 +40,29 @@ interface TransferStore {
   setPanelOpen: (open: boolean) => void;
 }
 
-export const useTransferStore = create<TransferStore>((set) => ({
+export const useTransferStore = create<TransferStore>((set, get) => ({
   tasksById: {},
   taskIds: [],
   isPanelOpen: false,
 
-  addTask: (task) => {
-    const id = crypto.randomUUID();
-    const newTask: TransferTask = {
+  addTask: (task) => get().addTasks([task])[0],
+
+  addTasks: (tasks) => {
+    const startTime = Date.now();
+    const newTasks = tasks.map((task): TransferTask => ({
       ...task,
-      id,
-      startTime: Date.now(),
+      id: crypto.randomUUID(),
+      startTime,
       status: 'pending',
       progress: 0,
       transferredSize: 0,
-    };
-    set((state) => ({
-      tasksById: { ...state.tasksById, [id]: newTask },
-      taskIds: [...state.taskIds, id],
     }));
-    return id;
+    const ids = newTasks.map((task) => task.id);
+    set((state) => ({
+      tasksById: { ...state.tasksById, ...Object.fromEntries(newTasks.map((task) => [task.id, task])) },
+      taskIds: [...state.taskIds, ...ids],
+    }));
+    return ids;
   },
 
   updateTask: (id, updates) => {

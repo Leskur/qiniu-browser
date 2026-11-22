@@ -191,6 +191,8 @@ export function BucketList({
           loading={loading}
           error={error}
           searchQuery={searchQuery}
+          onResetFilters={() => { setSearchQuery(""); setRegionFilter("all"); }}
+          onRetry={() => void loadBuckets(ak, sk)}
           sortField={sortField}
           sortDesc={sortDesc}
           deletingBucket={deletingBucket}

@@ -100,6 +100,8 @@ export function CdnManager({
   const [refreshType, setRefreshType] = useState<"file" | "directory">("file");
   const [tasks, setTasks] = useState<(RefreshTask | PrefetchTask)[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
+  const [tasksError, setTasksError] = useState("");
+  const lastQuery = useRef<{ requestId?: string; filters: RecordFilters; page: number } | null>(null);
   const [filters, setFilters] = useState<RecordFilters>(() => defaultFilters());
   const [filterError, setFilterError] = useState("");
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -128,49 +130,44 @@ export function CdnManager({
     }
   }, [prefillDomain, onPrefillUsed]);
 
-  const validateUrls = (list: string[]): { valid: string[]; invalid: string[] } => {
-    const valid: string[] = [];
-    const invalid: string[] = [];
-    for (const u of list) {
-      try {
-        const parsed = new URL(u);
-        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-          valid.push(u);
-        } else {
-          invalid.push(u);
-        }
-      } catch {
-        invalid.push(u);
-      }
+  const isValidUrl = (url: string) => {
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      return false;
     }
-    return { valid, invalid };
   };
 
   const handleSubmit = async () => {
-    const list = urls.split("\n").map(u => u.trim()).filter(Boolean);
+    const lines = urls.split("\n").map((text, index) => ({ url: text.trim(), line: index + 1 })).filter(({ url }) => url);
+    const list = lines.map(({ url }) => url);
     if (list.length === 0) return toast.warning("请输入URL");
 
-    const { valid, invalid } = validateUrls(list);
+    const invalid = lines.filter(({ url }) => !isValidUrl(url));
     if (invalid.length > 0) {
-      setUrlError("存在无效的 URL");
+      setUrlError(`第 ${invalid.map(({ line }) => line).join("、")} 行的 URL 无效。`);
       return;
     }
-    if (subTab === "refresh" && refreshType === "directory" && valid.some(url => !url.endsWith("/"))) {
-      setUrlError("目录 URL 必须以 / 结尾，请检查后重试");
+    const invalidDirectories = subTab === "refresh" && refreshType === "directory"
+      ? lines.filter(({ url }) => !url.endsWith("/"))
+      : [];
+    if (invalidDirectories.length > 0) {
+      setUrlError(`第 ${invalidDirectories.map(({ line }) => line).join("、")} 行的目录 URL 必须以 / 结尾。`);
       return;
     }
     setUrlError("");
 
     setLoading(true);
     try {
+      let rejected: string[];
       if (subTab === "refresh") {
-        const dirs = refreshType === "directory" ? valid : [];
-        const files = refreshType === "file" ? valid : [];
+        const dirs = refreshType === "directory" ? list : [];
+        const files = refreshType === "file" ? list : [];
         const res = await cdnRefresh(ak, sk, files, dirs);
         setTaskType("refresh");
-        const serverInvalid = [...(res.invalidUrls || []), ...(res.invalidDirs || [])];
-        if (serverInvalid.length > 0) toast.warning(`${serverInvalid.length} 个地址被服务器拒绝`, { description: serverInvalid.join("\n") });
-        const validCount = list.length - serverInvalid.length;
+        rejected = [...(res.invalidUrls || []), ...(res.invalidDirs || [])];
+        const validCount = list.length - rejected.length;
         if (validCount > 0) {
           const remaining = refreshType === "directory" ? res.dirSurplusDay : res.urlSurplusDay;
           toast.success(`${refreshType === "directory" ? "目录" : "文件"}刷新任务提交成功! 剩余配额: ${remaining}`, {
@@ -187,11 +184,10 @@ export function CdnManager({
           });
         }
       } else {
-        const res = await cdnPrefetch(ak, sk, valid);
+        const res = await cdnPrefetch(ak, sk, list);
         setTaskType("prefetch");
-        const invalidUrls = res.invalidUrls || [];
-        if (invalidUrls.length > 0) toast.warning(`${invalidUrls.length} 个地址被服务器拒绝`, { description: invalidUrls.join("\n") });
-        const validCount = list.length - invalidUrls.length;
+        rejected = res.invalidUrls || [];
+        const validCount = list.length - rejected.length;
         if (validCount > 0) {
           toast.success(`预取任务提交成功! 剩余配额: ${res.surplusDay}`, {
             description: `RequestID: ${res.requestId}`,
@@ -207,7 +203,10 @@ export function CdnManager({
           });
         }
       }
-      setUrls("");
+      setUrls(current => current === urls ? rejected.join("\n") : current);
+      if (rejected.length > 0) {
+        setUrlError(`服务器拒绝了 ${rejected.length} 个地址，修改后可重新提交。`);
+      }
     } catch (err: any) {
       toast.error(err.message || "操作失败");
     } finally {
@@ -231,6 +230,9 @@ export function CdnManager({
     const page = opts?.page ?? pageNo;
     // 用 in 判断，才能让 requestId: undefined 真正清除筛选
     const requestId = opts && "requestId" in opts ? opts.requestId : queryRequestId;
+    lastQuery.current = { requestId, filters: active, page };
+    setQueryRequestId(requestId);
+    setTasksError("");
     setLoadingTasks(true);
     try {
       const query = {
@@ -244,12 +246,11 @@ export function CdnManager({
       setTasks(res.items || []);
       setTotal(res.total ?? (res.items?.length || 0));
       setPageNo(res.pageNo ?? page);
-      setQueryRequestId(requestId);
       setTaskType(currentType);
     } catch (err: any) {
       if (requestVersion !== recordRequest.current) return;
       console.error("[CDN] 加载任务失败", err);
-      toast.error("加载任务失败", { description: err.message });
+      setTasksError(err instanceof Error ? err.message || "请稍后再试。" : String(err || "请稍后再试。"));
     } finally {
       if (requestVersion === recordRequest.current) setLoadingTasks(false);
     }
@@ -258,8 +259,7 @@ export function CdnManager({
   // ── F5 刷新触发 ──
   useEffect(() => {
     if (refreshTrigger !== undefined && refreshTrigger > 0 && subTab === "history") {
-      loadTasks({ page: pageNo });
-      toast.success('已刷新操作记录');
+      loadTasks(lastQuery.current ?? { page: pageNo });
     }
   }, [refreshTrigger]);
 
@@ -296,9 +296,9 @@ export function CdnManager({
         >
           {/* Tabs */}
           <TabsList aria-label="刷新预取">
-            <TabsTrigger value="refresh">缓存刷新</TabsTrigger>
-            <TabsTrigger value="prefetch">文件预取</TabsTrigger>
-            <TabsTrigger value="history">操作记录</TabsTrigger>
+            <TabsTrigger value="refresh" disabled={loading}>缓存刷新</TabsTrigger>
+            <TabsTrigger value="prefetch" disabled={loading}>文件预取</TabsTrigger>
+            <TabsTrigger value="history" disabled={loading}>操作记录</TabsTrigger>
           </TabsList>
 
           <TabsContent value={subTab}>
@@ -308,7 +308,7 @@ export function CdnManager({
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
                   操作记录
-                  {total > 0 && (
+                  {!loadingTasks && !tasksError && total > 0 && (
                     <span className="ml-2 text-xs font-normal text-zinc-400">共 {total} 条</span>
                   )}
                 </h3>
@@ -383,6 +383,14 @@ export function CdnManager({
               {loadingTasks ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+                </div>
+              ) : tasksError ? (
+                <div role="alert" className="rounded-lg border border-destructive/30 p-4">
+                  <p className="text-sm font-medium text-destructive">加载操作记录失败</p>
+                  <p className="my-2 break-all text-sm text-muted-foreground">{tasksError}</p>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    if (lastQuery.current) void loadTasks(lastQuery.current);
+                  }}>重试</Button>
                 </div>
               ) : tasks.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -551,6 +559,7 @@ export function CdnManager({
                 aria-invalid={!!urlError}
                 aria-describedby={urlError ? "cdn-url-error" : subTab === "refresh" ? "cdn-url-hint" : undefined}
                 value={urls}
+                readOnly={loading}
                 onChange={e => { setUrls(e.target.value); setUrlError(""); }}
                 placeholder={subTab === "refresh" && refreshType === "directory"
                   ? "https://example.com/assets/\nhttps://example.com/docs/"
@@ -574,7 +583,7 @@ export function CdnManager({
                 onClick={handleSubmit}
                 disabled={loading || !urls.trim()}
               >
-                {subTab === "refresh" ? "刷新" : "预取"}
+                {loading ? "提交中…" : subTab === "refresh" ? "刷新" : "预取"}
               </Button>
             </div>
           )}

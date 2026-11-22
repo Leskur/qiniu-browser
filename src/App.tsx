@@ -9,6 +9,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./components/ui/dialog";
 import { Login } from "./pages/Login";
 import { FileManager } from "./pages/FileManager";
@@ -20,10 +21,11 @@ import { BookmarkPage } from "./pages/BookmarkPage";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { useAppStore } from "./store";
+import { useTransferStore } from "./store/transfer";
 import {
   Database, Zap, LogOut, Settings, Bookmark,
   X, Folder, Globe, Loader2, Download,
-  PanelLeftClose, PanelLeft, Pencil,
+  PanelLeft, Pencil,
 } from "lucide-react";
 import "./App.css";
 
@@ -36,16 +38,8 @@ const SIDEBAR_COLLAPSED_WIDTH = 56;
 const SIDEBAR_EXPANDED_WIDTH = 230;
 
 function App() {
-  // 从 localStorage 恢复登录状态
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    const saved = localStorage.getItem('qiniu_session');
-    return saved ? JSON.parse(saved).isAuthenticated : false;
-  });
-  
-  const [credentials, setCredentials] = useState(() => {
-    const saved = localStorage.getItem('qiniu_session');
-    return saved ? JSON.parse(saved).credentials : { ak: "", sk: "", description: "" };
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [credentials, setCredentials] = useState({ ak: "", sk: "", description: "" });
   
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<Section>("storage");
@@ -69,17 +63,9 @@ function App() {
   const updateInstallInFlight = useRef(false);
   const updateCheckInFlight = useRef(false);
   
-  // 持久化登录状态
   useEffect(() => {
-    if (isAuthenticated && credentials.ak && credentials.sk) {
-      localStorage.setItem('qiniu_session', JSON.stringify({
-        isAuthenticated,
-        credentials
-      }));
-    } else {
-      localStorage.removeItem('qiniu_session');
-    }
-  }, [isAuthenticated, credentials]);
+    localStorage.removeItem('qiniu_session');
+  }, []);
 
   // ── App version ──
   useEffect(() => {
@@ -87,6 +73,7 @@ function App() {
   }, []);
 
   const handleLogin = (ak: string, sk: string, description?: string) => {
+    useAppStore.getState().setBucketAccount(ak);
     setCredentials({ ak, sk, description: description || "" });
     setIsAuthenticated(true);
   };
@@ -160,7 +147,7 @@ function App() {
   // F5 刷新当前页面
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'F5') {
+      if (isAuthenticated && e.key === 'F5') {
         e.preventDefault();
         
         if (activeSection === 'storage') {
@@ -169,8 +156,7 @@ function App() {
             setRefreshTrigger(prev => prev + 1);
           } else {
             // 在空间列表页面，刷新空间列表
-            loadBuckets(credentials.ak, credentials.sk);
-            toast.success('已刷新空间列表');
+            void useAppStore.getState().loadBuckets(credentials.ak, credentials.sk);
           }
         } else if (activeSection === 'cdn') {
           // 在 CDN 页面，触发子组件刷新
@@ -182,9 +168,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeSection, selectedBucket]);
-
-  const { loadBuckets, clearBuckets } = useAppStore();
+  }, [activeSection, selectedBucket, isAuthenticated, credentials.ak, credentials.sk]);
 
   const handleLogout = () => {
     setIsAuthenticated(false);
@@ -192,7 +176,10 @@ function App() {
     setSelectedBucket(null);
     setActiveSection("storage");
     setShowAccountMenu(false);
-    clearBuckets();
+    useAppStore.getState().setBucketAccount(null);
+    const transfers = useTransferStore.getState();
+    transfers.clearAll();
+    transfers.setPanelOpen(false);
     localStorage.removeItem('qiniu_session'); // 清除会话
     localStorage.removeItem('qiniu_last_login_ak'); // 清除自动登录记录
     localStorage.removeItem('qiniu_auto_login'); // 清除自动登录标记
@@ -219,12 +206,12 @@ function App() {
     setSidebarCompact(sidebarCollapsed);
   };
 
-  const navItems: { id: Section; label: string; icon: typeof Database; desc: string; cdnSection?: CdnSubSection }[] = [
-    { id: "storage", label: "空间管理", icon: Database, desc: "对象存储 · 文件" },
-    { id: "bookmarks", label: "书签管理", icon: Bookmark, desc: "快速访问 · 常用路径" },
-    { id: "cdn", label: "域名管理", icon: Globe, desc: "加速域名 · 配置详情", cdnSection: "domains" },
-    { id: "cdn", label: "刷新预取", icon: Zap, desc: "缓存刷新 · 文件预取", cdnSection: "refresh" },
-    { id: "settings", label: "设置", icon: Settings, desc: "外观 · 偏好" },
+  const navItems: { id: Section; label: string; icon: typeof Database; cdnSection?: CdnSubSection }[] = [
+    { id: "storage", label: "空间管理", icon: Database },
+    { id: "bookmarks", label: "书签管理", icon: Bookmark },
+    { id: "cdn", label: "域名管理", icon: Globe, cdnSection: "domains" },
+    { id: "cdn", label: "刷新预取", icon: Zap, cdnSection: "refresh" },
+    { id: "settings", label: "设置", icon: Settings },
   ];
 
   return (
@@ -256,17 +243,17 @@ function App() {
                   aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
                   aria-pressed={sidebarCollapsed}
                 >
-                  {sidebarCollapsed ? <PanelLeft /> : <PanelLeftClose />}
+                  <PanelLeft />
                 </Button>
               </div>
             </div>
 
             {/* Nav */}
             <nav className="flex-1 py-2 overflow-y-auto overflow-x-hidden">
-              {navItems.map(({ id, label, icon: Icon, desc, cdnSection }) => {
+              {navItems.map(({ id, label, icon: Icon, cdnSection }) => {
                 const active = activeSection === id && (!cdnSection || cdnSubSection === cdnSection);
                 return (
-                  <button
+                  <Button variant="ghost"
                     key={cdnSection || id}
                     aria-current={active ? "page" : undefined}
                     aria-label={label}
@@ -280,25 +267,18 @@ function App() {
                         if (cdnSection) setCdnSubSection(cdnSection);
                       }
                     }}
-                    className={`w-full h-12 flex items-center text-left group relative cursor-pointer
+                    className={`w-full h-12 flex items-center justify-start gap-0 rounded-none px-0 text-left group cursor-pointer
                       ${active
                         ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                         : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-800 dark:hover:text-zinc-200"}`}
                   >
-                    {/* Active indicator */}
-                    {active && (
-                      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-emerald-500" />
-                    )}
                     <span className="flex w-14 shrink-0 items-center justify-center">
                       <Icon className={`w-[18px] h-[18px] shrink-0 ${active ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-600 dark:group-hover:text-zinc-300"}`} />
                     </span>
-                    <div className={`min-w-0 flex-1 ${sidebarCompact ? "invisible w-0 overflow-hidden" : "pr-4 -ml-2"}`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <p className={`text-[13px] leading-tight whitespace-nowrap ${active ? "font-semibold" : "font-medium"}`}>{label}</p>
-                      </div>
-                      <p className="text-[10px] text-zinc-400 dark:text-zinc-500 leading-tight mt-0.5 whitespace-nowrap">{desc}</p>
-                    </div>
-                  </button>
+                    <span className={`min-w-0 flex-1 text-[13px] leading-tight whitespace-nowrap ${active ? "font-semibold" : "font-medium"} ${sidebarCompact ? "invisible w-0 overflow-hidden" : "pr-4 -ml-2"}`}>
+                      {label}
+                    </span>
+                  </Button>
                 );
               })}
             </nav>
@@ -306,12 +286,11 @@ function App() {
             {/* Account + system tools */}
             <div className="h-12 shrink-0 relative z-30">
               <div className="flex h-full items-center gap-1 px-0" style={{ minWidth: SIDEBAR_EXPANDED_WIDTH }}>
-                <button
+                <Popover open={showAccountMenu} onOpenChange={setShowAccountMenu}>
+                  <PopoverTrigger render={<Button variant="ghost" />}
                   aria-label="当前账号"
-                  aria-expanded={showAccountMenu}
                   title={sidebarCompact || sidebarCollapsed ? `${credentials.description || "未命名账号"}（账号）` : undefined}
-                  onClick={() => setShowAccountMenu(v => !v)}
-                  className="group/account flex h-9 min-w-0 flex-1 items-center gap-0 rounded-lg px-0 text-left transition-colors cursor-pointer"
+                  className="group/account flex h-9 min-w-0 flex-1 items-center justify-start gap-0 rounded-lg px-0 text-left transition-colors cursor-pointer"
                 >
                   <span className="flex w-14 shrink-0 items-center justify-center">
                     <div className="w-8 h-8 rounded-full bg-emerald-500/15 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300 flex items-center justify-center font-bold text-sm shrink-0">
@@ -323,7 +302,19 @@ function App() {
                   }`}>
                     {credentials.description || "未命名账号"}
                   </p>
-                </button>
+                  </PopoverTrigger>
+                  <PopoverContent side={sidebarCompact || sidebarCollapsed ? "right" : "top"} align="start" className="w-56 gap-0 p-1" aria-label="账号操作">
+                    <Button variant="ghost" className="w-full justify-start" onClick={() => {
+                      setAccountName(credentials.description || "");
+                      setShowAccountMenu(false);
+                      setShowRenameAccount(true);
+                    }}><Pencil />重命名</Button>
+                    <Button variant="ghost" className="w-full justify-start" onClick={() => {
+                      handleLogout();
+                      setShowAccountMenu(false);
+                    }}><LogOut />退出登录</Button>
+                  </PopoverContent>
+                </Popover>
 
                 <div className="flex shrink-0 items-center gap-0.5 pr-3">
                   {(availableUpdate || installingUpdate) && <Button
@@ -360,44 +351,6 @@ function App() {
                 </div>
               </div>
 
-              {showAccountMenu && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowAccountMenu(false)} />
-                  <div
-                    className={`bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-xl z-50 overflow-hidden ${
-                      sidebarCompact || sidebarCollapsed
-                        ? "fixed bottom-3 w-56"
-                        : "absolute bottom-full mb-1 left-0 right-0 mx-2"
-                    }`}
-                    style={
-                      sidebarCompact || sidebarCollapsed
-                        ? { left: SIDEBAR_COLLAPSED_WIDTH + 8 }
-                        : undefined
-                    }
-                  >
-                    <div className="py-1">
-                      <button
-                        onClick={() => {
-                          setAccountName(credentials.description || "");
-                          setShowAccountMenu(false);
-                          setShowRenameAccount(true);
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left cursor-pointer"
-                      >
-                        <Pencil className="w-4 h-4 shrink-0" />
-                        <span>重命名</span>
-                      </button>
-                      <button
-                        onClick={() => { handleLogout(); setShowAccountMenu(false); }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left cursor-pointer"
-                      >
-                        <LogOut className="w-4 h-4 shrink-0" />
-                        <span>退出登录</span>
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
 
           </aside>
@@ -410,6 +363,7 @@ function App() {
                 {selectedBucket ? (
                   <div className="absolute inset-0 z-20 bg-white dark:bg-zinc-950">
                     <FileManager
+                      key={selectedBucket}
                       ak={credentials.ak}
                       sk={credentials.sk}
                       bucket={selectedBucket}

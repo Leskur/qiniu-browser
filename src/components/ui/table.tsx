@@ -2,11 +2,13 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({ className, containerClassName, ...props }: React.ComponentProps<"table"> & {
+  containerClassName?: string
+}) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className={cn("relative w-full overflow-x-auto", containerClassName)}
     >
       <table
         data-slot="table"
@@ -76,6 +78,19 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   )
 }
 
+function TableSortButton({ className, ...props }: React.ComponentProps<"button">) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex h-full min-h-10 w-full cursor-pointer items-center gap-1 px-2 text-left text-xs font-medium text-zinc-500 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring dark:text-zinc-400 dark:hover:bg-zinc-800/50",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
 function TableCell({ className, ...props }: React.ComponentProps<"td">) {
   return (
     <td
@@ -108,6 +123,7 @@ export {
   TableBody,
   TableFooter,
   TableHead,
+  TableSortButton,
   TableRow,
   TableCell,
   TableCaption,

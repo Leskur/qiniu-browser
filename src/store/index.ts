@@ -22,7 +22,7 @@ interface AppState {
   setBuckets: (buckets: QiniuBucket[]) => void;
   loadBuckets: (ak: string, sk: string) => Promise<void>;
   refreshBuckets: (ak: string, sk: string) => Promise<void>;
-  clearBuckets: () => void;
+  setBucketAccount: (ak: string | null) => void;
   // 计算属性
   getTotalStats: () => { totalBuckets: number; totalFiles: number; totalSize: number };
   
@@ -82,6 +82,9 @@ function applyThemeToDOM(theme: Theme) {
   }
 }
 
+let bucketRequest = 0;
+let bucketAccount: string | null = null;
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -91,24 +94,36 @@ export const useAppStore = create<AppState>()(
       bucketsError: '',
       setBuckets: (buckets) => set({ buckets }),
       loadBuckets: async (ak, sk) => {
-        set({ bucketsLoading: true, bucketsError: '' });
+        if (ak !== bucketAccount) return;
+        const request = ++bucketRequest;
+        set({ bucketsLoading: true, bucketsRefreshing: false, bucketsError: '' });
         try {
           const data = await fetchBuckets(ak, sk);
+          if (request !== bucketRequest) return;
           set({ buckets: data, bucketsLoading: false });
         } catch (err: any) {
+          if (request !== bucketRequest) return;
           set({ bucketsError: err.message || '获取 Bucket 列表失败', bucketsLoading: false });
         }
       },
       refreshBuckets: async (ak, sk) => {
-        set({ bucketsRefreshing: true, bucketsError: '' });
+        if (ak !== bucketAccount) return;
+        const request = ++bucketRequest;
+        set({ bucketsRefreshing: true, bucketsLoading: false, bucketsError: '' });
         try {
           const data = await fetchBuckets(ak, sk);
+          if (request !== bucketRequest) return;
           set({ buckets: data, bucketsRefreshing: false });
         } catch (err: any) {
+          if (request !== bucketRequest) return;
           set({ bucketsError: err.message || '获取 Bucket 列表失败', bucketsRefreshing: false });
         }
       },
-      clearBuckets: () => set({ buckets: [], bucketsLoading: false, bucketsRefreshing: false, bucketsError: '' }),
+      setBucketAccount: (ak) => {
+        bucketAccount = ak;
+        bucketRequest++;
+        set({ buckets: [], bucketsLoading: false, bucketsRefreshing: false, bucketsError: '', bucketDomains: new Map() });
+      },
       getTotalStats: () => {
         const buckets = get().buckets;
         let totalFiles = 0;

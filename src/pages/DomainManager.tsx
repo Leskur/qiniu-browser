@@ -1,3 +1,4 @@
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableSortButton } from "@/components/ui/table";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/lib/toast";
 import { CdnDomain, fetchCdnDomain, fetchCdnDomains, onlineCdnDomain, offlineCdnDomain, deleteCdnDomain } from "../lib/qiniu";
@@ -187,7 +188,12 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
     ? `${visibleDomains.length} / ${domains.length} 个域名`
     : `${domains.length} 个域名`;
 
-  const thClass = "cursor-pointer select-none px-6 py-3 text-left text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/50";
+  const sortableColumns = [
+    { field: "name", label: "域名" },
+    { field: "operatingState", label: "状态" },
+    { field: "protocol", label: "协议" },
+    { field: "geoCover", label: "加速区域" },
+  ] as const;
 
   return (
     <div className="flex h-full flex-col bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
@@ -228,7 +234,7 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
         ) : listError && domains.length === 0 ? (
           <div className="m-6 rounded-xl border border-red-200 bg-red-50 p-6 text-red-600 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
             <div className="mb-2 font-medium">加载失败</div>
-            <div className="mb-4 break-all rounded bg-red-100/50 p-2 font-mono text-xs dark:bg-red-900/20">{listError}</div>
+            <div className="mb-4 break-all rounded-xs bg-red-100/50 p-2 font-mono text-xs dark:bg-red-900/20">{listError}</div>
             <Button variant="outline" size="sm" onClick={loadDomains}>重试</Button>
           </div>
         ) : visibleDomains.length === 0 ? (
@@ -250,53 +256,51 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
           </div>
         ) : (
           <div className="min-h-0 flex-1 overflow-auto">
-            <table className="w-full whitespace-nowrap text-left text-sm">
-              <thead className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50/80 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-900/80">
-                <tr>
-                  <th className={thClass} onClick={() => handleSort("name")} aria-sort={sortField === "name" ? (descending ? "descending" : "ascending") : "none"}>
-                    域名 <SortIcon field="name" />
-                  </th>
-                  <th className={thClass} onClick={() => handleSort("operatingState")} aria-sort={sortField === "operatingState" ? (descending ? "descending" : "ascending") : "none"}>
-                    状态 <SortIcon field="operatingState" />
-                  </th>
-                  <th className={thClass} onClick={() => handleSort("protocol")} aria-sort={sortField === "protocol" ? (descending ? "descending" : "ascending") : "none"}>
-                    协议 <SortIcon field="protocol" />
-                  </th>
-                  <th className={thClass} onClick={() => handleSort("geoCover")} aria-sort={sortField === "geoCover" ? (descending ? "descending" : "ascending") : "none"}>
-                    加速区域 <SortIcon field="geoCover" />
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400">CNAME</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+            <Table className="w-full whitespace-nowrap text-left text-sm">
+              <TableHeader className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50/80 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-900/80">
+                <TableRow>
+                  {sortableColumns.map(({ field, label }) => (
+                    <TableHead key={field} className="p-0"
+                      aria-sort={sortField === field ? (descending ? "descending" : "ascending") : undefined}>
+                      <TableSortButton className="px-6" onClick={() => handleSort(field)}>
+                        {label}<SortIcon field={field} />
+                      </TableSortButton>
+                    </TableHead>
+                  ))}
+                  <TableHead className="px-6 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400">CNAME</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
                 {visibleDomains.map(domain => (
-                  <tr
+                  <TableRow
                     key={domain.name}
                     className="group cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
                     onClick={() => onSelectDomain(domain.name)}
                   >
-                    <td className="px-6 py-3">
+                    <TableCell className="px-6 py-3">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-zinc-800 transition-colors group-hover:text-emerald-600 dark:text-zinc-100 dark:group-hover:text-emerald-400">
+                        <button type="button"
+                          onClick={e => { e.stopPropagation(); onSelectDomain(domain.name); }}
+                          className="cursor-pointer text-left font-medium text-zinc-800 transition-colors group-hover:text-emerald-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-zinc-100 dark:group-hover:text-emerald-400">
                           {domain.name}
-                        </span>
+                        </button>
                         {isWildcard(domain.type) && (
-                          <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">泛域名</span>
+                          <span className="rounded-xs px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">泛域名</span>
                         )}
                       </div>
-                    </td>
-                    <td className="px-6 py-3">
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
                       <span className={`text-xs ${status(domain.operatingState) === "failed" || status(domain.operatingState) === "frozen" ? "text-red-500" : status(domain.operatingState) === "online" ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-500 dark:text-zinc-400"}`}>
                         {statusLabel(domain.operatingState)}
                       </span>
-                    </td>
-                    <td className="px-6 py-3 text-xs text-zinc-500 dark:text-zinc-400">
+                    </TableCell>
+                    <TableCell className="px-6 py-3 text-xs text-zinc-500 dark:text-zinc-400">
                       {domain.protocol?.toUpperCase() || "-"}
-                    </td>
-                    <td className="px-6 py-3 text-xs text-zinc-500 dark:text-zinc-400">
+                    </TableCell>
+                    <TableCell className="px-6 py-3 text-xs text-zinc-500 dark:text-zinc-400">
                       {regionLabel(domain.geoCover)}
-                    </td>
-                    <td className="px-6 py-3">
+                    </TableCell>
+                    <TableCell className="px-6 py-3">
                       <div className="flex items-center gap-1">
                         <code className="text-xs text-zinc-500 dark:text-zinc-400">{domain.cname || "-"}</code>
                         {domain.cname && (
@@ -305,18 +309,18 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
                             variant="ghost"
                             size="icon-xs"
                             aria-label={`复制 ${domain.name} 的 CNAME`}
-                            className="opacity-0 text-zinc-400 transition-opacity group-hover:opacity-100"
+                            className="opacity-0 text-zinc-400 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                             onClick={e => { e.stopPropagation(); copy(domain.cname, " CNAME"); }}
                           >
                             <Copy />
                           </Button>
                         )}
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </div>

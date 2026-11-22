@@ -359,7 +359,8 @@ export function generateDownloadUrl(
   expireSeconds: number = 3600
 ): string {
   if (!domain.startsWith("http")) domain = "http://" + domain;
-  const baseUrl = `${domain}/${encodeURI(key)}`;
+  const encodedKey = key.split("/").map(segment => encodeURIComponent(segment)).join("/");
+  const baseUrl = `${domain}/${encodedKey}`;
   if (!isPrivate) return baseUrl;
 
   const deadline = Math.floor(Date.now() / 1000) + expireSeconds;
@@ -390,18 +391,44 @@ export async function batchOperations(ak: string, sk: string, ops: string[]): Pr
   return await response.json();
 }
 
-export async function batchDeleteFiles(ak: string, sk: string, bucket: string, keys: string[]): Promise<void> {
-  const chunks = [];
+export async function batchDeleteFiles(ak: string, sk: string, bucket: string, keys: string[]) {
+  const result = { deleted: 0, missing: 0, failed: 0, unconfirmed: 0, error: "" };
   for (let i = 0; i < keys.length; i += 1000) {
-    chunks.push(keys.slice(i, i + 1000));
-  }
-  for (const chunk of chunks) {
+    const chunk = keys.slice(i, i + 1000);
     const ops = chunk.map(key => {
       const encodedEntryURI = urlSafeBase64Encode(`${bucket}:${key}`);
       return `/delete/${encodedEntryURI}`;
     });
-    await batchOperations(ak, sk, ops);
+    let entries: { code?: number }[];
+    try {
+      const response = await batchOperations(ak, sk, ops);
+      if (!Array.isArray(response) || response.length !== chunk.length) {
+        throw new Error("七牛返回的逐项结果数量与请求不一致");
+      }
+      entries = response;
+    } catch (error) {
+      result.unconfirmed += chunk.length;
+      result.error ||= error instanceof Error ? error.message : String(error);
+      result.unconfirmed += keys.length - i - chunk.length;
+      break;
+    }
+    for (const entry of entries) {
+      if (entry?.code === 200) result.deleted++;
+      else if (entry?.code === 612) result.missing++;
+      else if (typeof entry?.code === "number") {
+        result.failed++;
+        result.error ||= `七牛返回状态码 ${entry.code}`;
+      } else {
+        result.unconfirmed++;
+        result.error ||= "七牛返回了无效的逐项结果";
+      }
+    }
   }
+  return result;
+}
+
+export function formatBatchDeleteResult(result: Awaited<ReturnType<typeof batchDeleteFiles>>) {
+  return `已删除 ${result.deleted} 项，已不存在 ${result.missing} 项，失败 ${result.failed} 项，未确认 ${result.unconfirmed} 项`;
 }
 
 /**
@@ -489,14 +516,25 @@ export async function createFolder(
 
 export async function deleteDirectory(ak: string, sk: string, bucket: string, prefix: string): Promise<void> {
   let marker = "";
+  const seenMarkers = new Set<string>();
+  let deleted = 0;
   while (true) {
-    const res = await fetchFiles(ak, sk, bucket, prefix, marker, 1000);
-    if (res.items && res.items.length > 0) {
-      const keys = res.items.map((i: any) => i.key);
-      await batchDeleteFiles(ak, sk, bucket, keys);
+    try {
+      const res = await fetchFiles(ak, sk, bucket, prefix, marker, 1000);
+      if (res.items?.length) {
+        const result = await batchDeleteFiles(ak, sk, bucket, res.items.map(item => item.key));
+        deleted += result.deleted;
+        if (result.failed || result.unconfirmed) {
+          throw new Error(`当前批次${formatBatchDeleteResult(result)}。 ${result.error}`);
+        }
+      }
+      if (!res.marker) break;
+      if (seenMarkers.has(res.marker)) throw new Error("目录分页游标重复");
+      seenMarkers.add(res.marker);
+      marker = res.marker;
+    } catch (error) {
+      throw new Error(`目录删除未完成，已确认删除 ${deleted} 项。 ${error instanceof Error ? error.message : String(error)}`);
     }
-    if (!res.marker) break;
-    marker = res.marker;
   }
 }
 
