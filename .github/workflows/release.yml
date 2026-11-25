@@ -15,13 +15,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
+          - platform: 'macos-15'
             args: '--target aarch64-apple-darwin'
             assetLabel: 'macOS_Apple-Silicon'
-          - platform: 'macos-latest'
+          - platform: 'macos-15-intel'
             args: '--target x86_64-apple-darwin'
             assetLabel: 'macOS_Intel'
-          - platform: 'windows-latest'
+          - platform: 'windows-2025'
             args: ''
             assetLabel: 'Windows_x64'
           - platform: 'ubuntu-22.04'
@@ -42,13 +42,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: lts/*
+          node-version: '26'
           cache: 'npm'
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.94.1
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -76,7 +76,7 @@ jobs:
             以上为文件名后缀。`.sig`、`.app.tar.gz` 和 `latest.json` 用于自动更新，手动安装请选择上面的安装包。
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.platform == 'macos-latest' && format('{0} --bundles app,dmg', matrix.args) || matrix.args }}
+          args: ${{ runner.os == 'macOS' && format('{0} --bundles app,dmg', matrix.args) || matrix.args }}
           assetNamePattern: 'Qiniu.Browser_[version]_${{ matrix.assetLabel }}[_setup][ext]'
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
@@ -84,7 +84,7 @@ jobs:
   publish:
     name: Publish stable release
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:

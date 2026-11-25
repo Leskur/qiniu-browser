@@ -72,6 +72,18 @@ git push origin v0.0.2
 
 推送 tag 后，GitHub Actions 会自动构建以下平台的安装包：
 
+发布环境固定为以下版本：
+
+| 构建目标 | Runner |
+| --- | --- |
+| macOS Apple Silicon | `macos-15`（ARM64） |
+| macOS Intel | `macos-15-intel`（x64） |
+| Windows x64 | `windows-2025` |
+| Linux x64 | `ubuntu-22.04` |
+| 发布 Release | `ubuntu-22.04` |
+
+Node.js 固定为 `26` 主版本，Rust 固定为 `1.94.1`。Node.js 仍接收 26 系列内的更新，Runner 镜像中的预装工具也会更新；这并非完整的环境快照。升级系统或工具链时，应单独修改工作流并验证构建。
+
 ### Windows
 - `Qiniu.Browser_x.x.x_Windows_x64_setup.exe` - 64 位 Intel / AMD 安装程序
 
