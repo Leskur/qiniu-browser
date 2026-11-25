@@ -28,5 +28,6 @@
 ## 📄 根目录文档
 
 - `ROADMAP.md` - 项目路线图和开发计划
+- `ARCHITECTURE.md` - 模块职责、依赖边界和验证方式
 - `REFERENCE.md` - 参考资料
 - `SHADCN_COMPONENTS.md` - Shadcn UI 组件使用说明

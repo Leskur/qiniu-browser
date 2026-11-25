@@ -1,10 +1,12 @@
+import { useDirectoryListing } from './file-manager/useDirectoryListing';
+import { useBucketDomains } from './file-manager/useBucketDomains';
+import { useFileUploads } from './file-manager/useFileUploads';
+import { useFileDownloads } from './file-manager/useFileDownloads';
 import { Label } from "@/components/ui/label";
-import { createUploadRetry } from "../lib/upload-retry";
-import { ensureTransferEvents, failActiveTransfers } from "../lib/transfer-events";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { fetchFiles, fetchBucketDomains, QiniuFile, deleteFile, deleteDirectory, generateDownloadUrl, batchDeleteFiles, formatBatchDeleteResult, renameFile, createFolder } from "../lib/qiniu";
+import { QiniuFile, deleteFile, deleteDirectory, generateDownloadUrl, batchDeleteFiles, formatBatchDeleteResult, renameFile, createFolder } from "../lib/qiniu";
 import {
   File, Image, Film, FileText, Archive,
   Link2, Copy, Check, RefreshCw, Trash2, Upload, FolderOpen,
@@ -12,10 +14,7 @@ import {
   Search, FolderPlus, ZoomIn, ChevronLeft, Maximize2, Bookmark, Loader2, ChevronDown
 } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { open, save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
-import { useTransferStore } from "../store/transfer";
 import { useAppStore } from "../store";
 import { formatBytes, formatQiniuTime } from "../lib/utils";
 import { Button } from "../components/ui/button";
@@ -48,14 +47,6 @@ function HighlightText({ text, query }: { text: string; query: string }) {
   );
 }
 
-/** 过滤空目录占位符（key 以 / 结尾），目录只取 commonPrefixes */
-function normalizeListResult(res: { items?: QiniuFile[]; commonPrefixes?: string[]; marker?: string }) {
-  const items = (res.items || []).filter(i => !i.key.endsWith('/'));
-  const folders = res.commonPrefixes || [];
-  const nextMarker = res.marker || "";
-  return { items, folders, nextMarker, hasMore: !!nextMarker };
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 type VirtualEntry =
@@ -66,11 +57,9 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   ak: string; sk: string; bucket: string; onBack: () => void; refreshTrigger?: number;
   initialPrefix?: string; onInitialPrefixUsed?: () => void;
 }) {
-  const [domains, setDomains] = useState<string[]>([]);
+  const domains = useBucketDomains(ak, sk, bucket);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   
-  // Transfer store
-  const setPanelOpen = useTransferStore((s) => s.setPanelOpen);
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
@@ -83,7 +72,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   // 桶信息未就绪时默认按私有签名，避免裸链 401
   const isPrivateBucket = bucketInfo ? bucketInfo.private === 1 : true;
   
-  // Folder upload dialog
+  // Upload menu visibility
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
 
   // ── Virtual folder navigation + history ──
@@ -148,39 +137,29 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     };
   }, [goBack, goForward]);
 
-  // ── Per-directory data state ──
-  const [items, setItems]           = useState<QiniuFile[]>([]);
-  const [folders, setFolders]       = useState<string[]>([]); // commonPrefixes from API
-  const [nextMarker, setNextMarker] = useState<string>("");
-  const [hasMore, setHasMore]       = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loading, setLoading]       = useState(true);
-  const [error, setError]           = useState("");
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const someSelected = selectedKeys.size > 0;
+  const resetSelection = useCallback(() => setSelectedKeys(new Set()), []);
+  const {
+    items, folders, hasMore, loadingMore, loading, error,
+    searchInput, setSearchInput, committedSearch, currentPrefixRef,
+    loadDirectory, loadMore, clearSearch, runPrefixSearch, refreshCurrentView,
+    invalidateDirectory, clearDirectoryCache, removeListedFile,
+  } = useDirectoryListing({ ak, sk, bucket, currentPrefix, onSelectionReset: resetSelection });
+  const {
+    isUploading, uploadChoice, overwriteUpload, setOverwriteUpload,
+    finishUploadChoice, handleUploadPaths, handleUpload,
+  } = useFileUploads({
+    ak, sk, bucket, currentPrefix, mounted,
+    onUploaded: (prefix) => {
+      invalidateDirectory(prefix);
+      if (mounted.current && prefix === currentPrefixRef.current) void loadDirectory(prefix, true);
+    },
+  });
+  const { downloadPrompt, finishDownloadPrompt, handleDownload, handleBatchDownload, handleDownloadFolder } = useFileDownloads({
+    ak, sk, bucket, domains, isPrivateBucket, mounted, selectedKeys, onSelectionReset: resetSelection,
+  });
 
-  // ── Directory cache with timestamp ──
-  const dirCache = useRef<Map<string, { 
-    items: QiniuFile[]; 
-    folders: string[]; 
-    nextMarker: string; 
-    hasMore: boolean;
-    timestamp: number;
-  }>>(new Map());
-
-  // 清理只影响缓存，当前展示的数据和登录、书签等偏好保持不变。
-  useEffect(() => useAppStore.subscribe((state, previous) => {
-    if (state.cacheVersion !== previous.cacheVersion) dirCache.current.clear();
-  }), []);
-
-  
-  // Get cache expire time from settings
-  const { cacheExpireMinutes, itemsPerPage } = useAppStore();
-  const CACHE_TTL = cacheExpireMinutes * 60 * 1000;
-
-  // 账号、空间或每页数量变化后，旧列表不能继续用于当前请求。
-  useEffect(() => {
-    dirCache.current.clear();
-  }, [ak, sk, bucket, itemsPerPage]);
-  
   // Refresh throttle to prevent excessive API calls
   const [lastRefreshTime, setLastRefreshTime] = useState(0);
   const REFRESH_COOLDOWN = 2000; // 2 seconds
@@ -230,42 +209,14 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
   const closeCtxMenu = () => setCtxMenu(null);
 
-  // ── Search state ──
-  const [searchInput, setSearchInput] = useState("");
-  const [committedSearch, setCommittedSearch] = useState(""); // 已生效的前缀过滤
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const inApiSearchRef = useRef(false);
-  const listRequestId = useRef(0);
-  const loadedListPrefix = useRef<string | null>(null);
-  const paginationPending = useRef(false);
-  const currentPrefixRef = useRef(currentPrefix);
-  currentPrefixRef.current = currentPrefix;
 
   // ── Delete state ──
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
   const [dirToDelete, setDirToDelete] = useState<string | null>(null);
   const [batchDeletePending, setBatchDeletePending] = useState(false);
   const [isDeleting, setIsDeleting]     = useState(false);
-  const [downloadPrompt, setDownloadPrompt] = useState<string | null>(null);
-  const downloadPromptResolver = useRef<((confirmed: boolean) => void) | null>(null);
-  useEffect(() => () => downloadPromptResolver.current?.(false), []);
-
-  const confirmDownload = (message: string) => {
-    if (downloadPromptResolver.current) return Promise.resolve(false);
-    return new Promise<boolean>((resolve) => {
-      downloadPromptResolver.current = resolve;
-      setDownloadPrompt(message);
-    });
-  };
-
-  const finishDownloadPrompt = (confirmed: boolean) => {
-    downloadPromptResolver.current?.(confirmed);
-    downloadPromptResolver.current = null;
-    setDownloadPrompt(null);
-  };
-
-  // ── Upload state ──
-  const [isUploading, setIsUploading] = useState(false);
+  // ── Drag-drop feedback ──
   const [isDragOver, setIsDragOver] = useState(false);
 
   // ── Create folder state ──
@@ -273,10 +224,6 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   const [newFolderName, setNewFolderName] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   
-  // ── Batch selection ──
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-  const someSelected = selectedKeys.size > 0;
-
   // ── Breadcrumb overflow menu ──
   const [breadcrumbMenuOpen, setBreadcrumbMenuOpen] = useState(false);
 
@@ -383,272 +330,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     };
   }, [ak, sk, bucket, currentPrefix]);
 
-  const [uploadChoice, setUploadChoice] = useState<{
-    sourcePath: string;
-    selectionCount: number;
-    destination: string;
-    fileCount: number;
-    totalSize: number;
-  } | null>(null);
-  const uploadChoiceResolver = useRef<((value: string | null) => void) | null>(null);
-  const [overwriteUpload, setOverwriteUpload] = useState(false);
-  const uploadPending = useRef(false);
-  useEffect(() => () => uploadChoiceResolver.current?.(null), []);
-  const finishUploadChoice = (value: string | null) => {
-    uploadChoiceResolver.current?.(value);
-    uploadChoiceResolver.current = null;
-    setUploadChoice(null);
-  };
-  const handleUploadPaths = async (paths: string[]) => {
-    if (!mounted.current || paths.length === 0 || uploadPending.current) return;
-    uploadPending.current = true;
-    let taskIds: string[] = [];
-    
-    try {
-      const files = await invoke<{ path: string; key: string; size: number }[]>('prepare_uploads', {
-        filePaths: paths,
-        prefix: currentPrefix,
-        relativePaths: null,
-      });
-      if (!mounted.current) return;
-      if (files.length === 0) {
-        toast.info("所选目录中没有可上传的文件");
-        return;
-      }
-      setOverwriteUpload(false);
-      const policy = await new Promise<string | null>(resolve => {
-        uploadChoiceResolver.current = resolve;
-        setUploadChoice({
-          sourcePath: paths[0],
-          selectionCount: paths.length,
-          destination: `${bucket}/${currentPrefix}`,
-          fileCount: files.length,
-          totalSize: files.reduce((total, file) => total + file.size, 0),
-        });
-      });
-      if (!policy) return;
-      await ensureTransferEvents();
-      if (!mounted.current) return;
-      setIsUploading(true);
-      const transfers = useTransferStore.getState();
-      taskIds = transfers.addTasks(files.map(({ path, key, size }) => ({
-        type: 'upload',
-        fileName: key,
-        filePath: path,
-        totalSize: size,
-      })));
-      transfers.batchUpdateTasks(new Map(files.map(({ path, key }, index) => {
-        const id = taskIds[index];
-        return [id, { retry: createUploadRetry(id, { ak, sk, bucket, filePath: path, key, conflictPolicy: policy }) }];
-      })));
-      const upload = invoke<{ uploaded: string[]; failed: string[]; skipped: string[]; cancelled: number }>('upload_files', {
-        ak, sk, bucket,
-        filePaths: files.map(({ path }) => path),
-        prefix: '',
-        relativePaths: files.map(({ key }) => key),
-        taskIds,
-        conflictPolicy: policy,
-      });
-      setPanelOpen(true);
-      const result = await upload;
-      
-      const summary = `成功 ${result.uploaded.length} 个，跳过 ${result.skipped.length} 个，失败 ${result.failed.length} 个，取消 ${result.cancelled} 个`;
-      if (result.failed.length > 0) toast.warning('上传结束，部分文件失败', { description: summary });
-      else if (result.cancelled > 0) toast.info('上传已停止', { description: summary });
-      else toast.success('上传结束', { description: summary });
-      dirCache.current.delete(currentPrefix);
-      if (mounted.current && currentPrefix === currentPrefixRef.current) void loadDirectory(currentPrefix, true);
-    } catch (err) {
-      failActiveTransfers(taskIds, err);
-      toast.error('上传失败', { description: String(err) });
-    } finally {
-      setIsUploading(false);
-      uploadPending.current = false;
-    }
-  };
-
-  // ── Download ──
-  const handleDownload = async (key: string) => {
-    if (domains.length === 0) {
-      toast.warning("此存储空间未绑定外链域名，无法下载", {
-        description: "请先在「CDN → 域名」绑定域名后再试",
-      });
-      return;
-    }
-    const filename = key.split('/').pop() || key;
-    const savePath = await save({
-      title: "保存文件",
-      defaultPath: filename,
-    });
-    if (!savePath) return;
-    const url = generateDownloadUrl(ak, sk, domains[0], key, isPrivateBucket);
-    const tid = toast.loading(`正在下载 ${filename}...`, { duration: Infinity });
-    try {
-      await invoke("download_file", { url, savePath });
-      toast.dismiss(tid);
-      toast.success("下载完成", { description: filename });
-    } catch (err: any) {
-      toast.dismiss(tid);
-      toast.error("下载失败", { description: String(err) });
-    }
-  };
-
-  // ─── Load domain list once with cache ───────────────────────────────────────────────
-  useEffect(() => {
-    const { getBucketDomains, setBucketDomains } = useAppStore.getState();
-    
-    // Check cache first
-    const cached = getBucketDomains(bucket);
-    if (cached) {
-      setDomains(cached);
-      return;
-    }
-    
-    // Fetch from API
-    let cancelled = false;
-    fetchBucketDomains(ak, sk, bucket)
-      .then(domains => {
-        if (cancelled) return;
-        setDomains(domains);
-        setBucketDomains(bucket, domains);
-      })
-      .catch(() => { if (!cancelled) setDomains([]); });
-    return () => { cancelled = true; };
-  }, [ak, sk, bucket]);
-
-  // ─── Load files whenever prefix changes ──────────────────────────────────
-  const loadDirectory = useCallback(async (prefix: string, forceRefresh = false) => {
-    if (prefix !== currentPrefixRef.current) return;
-    const requestId = ++listRequestId.current;
-    const isCurrent = () => requestId === listRequestId.current && prefix === currentPrefixRef.current;
-    loadedListPrefix.current = null;
-    paginationPending.current = false;
-    setLoadingMore(false);
-    // Check cache first with expiration
-    if (!forceRefresh && dirCache.current.has(prefix)) {
-      const cached = dirCache.current.get(prefix)!;
-      const isExpired = Date.now() - cached.timestamp > CACHE_TTL;
-      
-      if (!isExpired) {
-        // Use cached data
-        setItems(cached.items);
-        setFolders(cached.folders);
-        setNextMarker(cached.nextMarker);
-        setHasMore(cached.hasMore);
-        loadedListPrefix.current = prefix;
-        setLoading(false);
-        setError("");
-        setSelectedKeys(new Set());
-        return;
-      } else {
-        // Cache expired, remove it
-        dirCache.current.delete(prefix);
-      }
-    }
-
-    setLoading(true);
-    setError("");
-    setItems([]);
-    setFolders([]);
-    setNextMarker("");
-    setHasMore(false);
-    setSelectedKeys(new Set());
-    try {
-      const res = await fetchFiles(ak, sk, bucket, prefix, "", itemsPerPage, "/");
-      if (!isCurrent()) return;
-      const { items: newItems, folders: newFolders, nextMarker: newMarker, hasMore: newHasMore } =
-        normalizeListResult(res);
-
-      setItems(newItems);
-      setFolders(newFolders);
-      setNextMarker(newMarker);
-      setHasMore(newHasMore);
-      loadedListPrefix.current = prefix;
-      dirCache.current.set(prefix, { 
-        items: newItems, 
-        folders: newFolders, 
-        nextMarker: newMarker, 
-        hasMore: newHasMore,
-        timestamp: Date.now()
-      });
-    } catch (err: any) {
-      if (!isCurrent()) return;
-      setError(err.message || "加载失败");
-    } finally {
-      if (isCurrent()) setLoading(false);
-    }
-  }, [ak, sk, bucket, CACHE_TTL, itemsPerPage]);
-
-  const clearSearch = useCallback(() => {
-    setSearchInput("");
-    setCommittedSearch("");
-    if (inApiSearchRef.current) {
-      inApiSearchRef.current = false;
-      loadDirectory(currentPrefix);
-    }
-  }, [loadDirectory, currentPrefix]);
-
-  const runPrefixSearch = useCallback(async (rawQuery: string) => {
-    const q = rawQuery.trim();
-    if (!q) {
-      setCommittedSearch("");
-      if (inApiSearchRef.current) {
-        inApiSearchRef.current = false;
-        await loadDirectory(currentPrefixRef.current);
-      }
-      return;
-    }
-
-    const directoryPrefix = currentPrefixRef.current;
-    const listPrefix = directoryPrefix + q;
-    const reqId = ++listRequestId.current;
-    const isCurrent = () => reqId === listRequestId.current && directoryPrefix === currentPrefixRef.current;
-    loadedListPrefix.current = null;
-    paginationPending.current = false;
-    setLoadingMore(false);
-    setNextMarker("");
-    setHasMore(false);
-    inApiSearchRef.current = true;
-    setCommittedSearch(q);
-    setLoading(true);
-    setError("");
-    setSelectedKeys(new Set());
-    try {
-      const res = await fetchFiles(ak, sk, bucket, listPrefix, "", itemsPerPage, "/");
-      if (!isCurrent()) return;
-      const normalized = normalizeListResult(res);
-      setItems(normalized.items);
-      setFolders(normalized.folders);
-      setNextMarker(normalized.nextMarker);
-      setHasMore(normalized.hasMore);
-      loadedListPrefix.current = listPrefix;
-    } catch (err: any) {
-      if (!isCurrent()) return;
-      setError(err.message || "搜索失败");
-    } finally {
-      if (isCurrent()) setLoading(false);
-    }
-  }, [ak, sk, bucket, itemsPerPage, loadDirectory]);
-
-  // 输入防抖自动前缀过滤；清空则恢复当前目录
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (searchInput.trim() === committedSearch.trim()) return;
-      void runPrefixSearch(searchInput);
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [searchInput, committedSearch, runPrefixSearch]);
-
-  /** 刷新当前视图：搜索中则重跑前缀搜索，否则刷新目录 */
-  const refreshCurrentView = useCallback(async (forceRefresh = true) => {
-    const q = committedSearch.trim();
-    if (!q) {
-      await loadDirectory(currentPrefix, forceRefresh);
-      return;
-    }
-    await runPrefixSearch(q);
-  }, [committedSearch, loadDirectory, currentPrefix, runPrefixSearch]);
-
+  // ── Escape closes the current interaction ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || previewFile) return;
@@ -659,56 +341,6 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [ctxMenu, selectedFile, searchInput, committedSearch, previewFile, clearSearch]);
-
-  // ─── Load more (next page) ────────────────────────────────────────────────
-  const loadMore = useCallback(async () => {
-    const listPrefix = committedSearch ? currentPrefix + committedSearch : currentPrefix;
-    if (!hasMore || loadingMore || !nextMarker || paginationPending.current ||
-        loadedListPrefix.current !== listPrefix || currentPrefix !== currentPrefixRef.current) return;
-    const requestId = listRequestId.current;
-    const isCurrent = () => requestId === listRequestId.current && currentPrefix === currentPrefixRef.current;
-    paginationPending.current = true;
-    setLoadingMore(true);
-    const isSearch = !!committedSearch;
-    try {
-      const res = await fetchFiles(ak, sk, bucket, listPrefix, nextMarker, itemsPerPage, "/");
-      if (!isCurrent()) return;
-      const { items: moreItems, folders: moreFolders, nextMarker: newMarker, hasMore: newHasMore } =
-        normalizeListResult(res);
-
-      setItems(prev => [...prev, ...moreItems]);
-      setFolders(prev => {
-        const existing = new Set(prev);
-        return [...prev, ...moreFolders.filter(f => !existing.has(f))];
-      });
-      setNextMarker(newMarker);
-      setHasMore(newHasMore);
-      if (!isSearch) {
-        dirCache.current.set(currentPrefix, {
-          items: [...items, ...moreItems],
-          folders: [...new Set([...folders, ...moreFolders])],
-          nextMarker: newMarker,
-          hasMore: newHasMore,
-          timestamp: Date.now()
-        });
-      }
-    } catch (err: any) {
-      if (!isCurrent()) return;
-      toast.error("加载更多失败", { description: err.message });
-    } finally {
-      if (isCurrent()) {
-        paginationPending.current = false;
-        setLoadingMore(false);
-      }
-    }
-  }, [ak, sk, bucket, currentPrefix, nextMarker, hasMore, loadingMore, items, folders, itemsPerPage, committedSearch]);
-
-  useEffect(() => {
-    inApiSearchRef.current = false;
-    loadDirectory(currentPrefix);
-    setSearchInput("");
-    setCommittedSearch("");
-  }, [currentPrefix, loadDirectory]);
 
   // ─── Derived entries for current level ───────────────────────────────────
   // folders come directly from API commonPrefixes, files from items
@@ -874,106 +506,6 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     }
   };
 
-  const handleBatchDownload = async () => {
-    const keys = [...selectedKeys];
-    if (keys.length === 0) return;
-    if (domains.length === 0) {
-      toast.warning('此存储空间未绑定外链域名，无法下载', {
-        description: '请先在「CDN → 域名」绑定域名后再试',
-      });
-      return;
-    }
-    try {
-      const dir = await open({ directory: true, title: '选择保存目录' });
-      if (!dir || Array.isArray(dir) || !mounted.current) return;
-      await downloadBatch(keys.map(key => ({ key, name: key.split('/').pop() || key })), dir);
-      setSelectedKeys(new Set());
-    } catch (err: any) {
-      toast.error('批量下载失败', { description: String(err) });
-    }
-  };
-
-  const downloadBatch = async (files: { key: string; name: string }[], dir: string) => {
-    await ensureTransferEvents();
-    if (!mounted.current) return;
-    const items = files.map(({ key, name }) => [
-      generateDownloadUrl(ak, sk, domains[0], key, isPrivateBucket),
-      name,
-    ]);
-    const taskIds = useTransferStore.getState().addTasks(files.map(({ name }) => ({
-      type: "download",
-      fileName: name,
-      totalSize: 0,
-    })));
-    setPanelOpen(true);
-    try {
-      const result = await invoke<{ downloaded: string[]; failed: string[] }>(
-        'download_files_to_dir', { items, dir, taskIds },
-      );
-      if (result.failed.length > 0) {
-        toast.warning("下载未完全成功", { description: `成功 ${result.downloaded.length} 个，失败 ${result.failed.length} 个` });
-      }
-    } catch (error) {
-      failActiveTransfers(taskIds, error);
-      throw error;
-    }
-  };
-  
-  const handleDownloadFolder = async (folderPrefix: string) => {
-    if (domains.length === 0) {
-      toast.warning('此存储空间未绑定外链域名，无法下载', {
-        description: '请先在「CDN → 域名」绑定域名后再试',
-      });
-      return;
-    }
-    
-    let loadingToast: string | undefined;
-    try {
-      const dir = await open({ directory: true, title: '选择保存目录' });
-      if (!dir || Array.isArray(dir) || !mounted.current) return;
-      const allFiles: QiniuFile[] = [];
-      const seenMarkers = new Set<string>();
-      let marker = "";
-      loadingToast = toast.loading('正在获取文件夹内容...');
-      do {
-        const res = await fetchFiles(ak, sk, bucket, folderPrefix, marker, 1000);
-        if (!mounted.current) return;
-        allFiles.push(...(res.items || []).filter(file => !file.key.endsWith('/')));
-        marker = res.marker || "";
-        if (marker && seenMarkers.has(marker)) throw new Error("文件夹分页游标重复");
-        seenMarkers.add(marker);
-        toast.loading(`已获取 ${allFiles.length} 个文件...`, { id: loadingToast });
-      } while (marker);
-      toast.dismiss(loadingToast);
-      loadingToast = undefined;
-
-      if (allFiles.length === 0) {
-        toast.info('文件夹为空');
-        return;
-      }
-      
-      const folderName = folderPrefix.slice(0, -1).split('/').pop() || 'folder';
-
-      if (allFiles.length > 100) {
-        const totalSize = allFiles.reduce((sum, f) => sum + f.fsize, 0);
-        const confirmed = await confirmDownload(
-          `即将下载 ${allFiles.length} 个文件，总大小约 ${formatBytes(totalSize)}。\n\n是否继续？`
-        );
-        if (!confirmed) return;
-      }
-      
-      await downloadBatch(allFiles.map(({ key }) => ({
-        key,
-        name: folderName + '/' + key.slice(folderPrefix.length),
-      })), dir);
-    } catch (err) {
-      toast.error('下载文件夹失败', { description: String(err) });
-    } finally {
-      if (loadingToast) toast.dismiss(loadingToast);
-    }
-  };
-
-  // ─── Navigation ──────────────────────────────────────────────────────────
   const breadcrumbs = useMemo(() => {
     if (!currentPrefix) return [];
     return currentPrefix.split('/').filter(Boolean);
@@ -1021,7 +553,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     }).catch(() => toast.error("复制失败"));
   };
 
-  // ─── Upload ──────────────────────────────────────────────────────────────
+  // ─── Create folder ───────────────────────────────────────────────────────
   const handleCreateFolder = async () => {
     const name = newFolderName.trim();
     if (!name) return;
@@ -1049,39 +581,13 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     }
   };
 
-  const handleUpload = async (directory: boolean) => {
-    try {
-      const selected = await open({
-        multiple: !directory, directory,
-        title: directory ? "选择要上传的文件夹" : "选择要上传的文件",
-      });
-      if (!selected) return;
-      const paths: string[] = Array.isArray(selected) ? selected : [selected];
-      
-      void handleUploadPaths(paths);
-    } catch (err: any) {
-      toast.error("打开文件对话框失败", { description: err.message });
-    }
-  };
-  
   // ─── Delete ──────────────────────────────────────────────────────────────
   const executeDeleteFile = async (key: string) => {
     setIsDeleting(true);
     try {
       await deleteFile(ak, sk, bucket, key);
       toast.success("文件已删除", { description: key });
-      const newItems = items.filter(f => f.key !== key);
-      setItems(newItems);
-      // Update cache with timestamp
-      if (dirCache.current.has(currentPrefix)) {
-        dirCache.current.set(currentPrefix, { 
-          items: newItems, 
-          folders, 
-          nextMarker, 
-          hasMore,
-          timestamp: Date.now()
-        });
-      }
+      removeListedFile(key);
       setFileToDelete(null);
     } catch (err: any) {
       toast.error("删除失败", { description: err.message });
@@ -1101,7 +607,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     } finally {
       toast.dismiss(tid);
       setDirToDelete(null);
-      dirCache.current.clear();
+      clearDirectoryCache();
       if (mounted.current && currentPrefix === currentPrefixRef.current) void refreshCurrentView(true);
       setIsDeleting(false);
     }
