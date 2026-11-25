@@ -26,9 +26,12 @@
 
 前往 [Releases](https://github.com/Leskur/qiniu-browser/releases) 页面下载对应平台的安装包：
 
-- **Windows**: `.exe` 或 `.msi`
-- **macOS**: `.dmg`
-- **Linux**: `.deb` 或 `.AppImage`
+- **Windows（64 位 Intel / AMD）**：选择 `Windows_x64_setup.exe` 后缀的安装包。
+- **macOS（M 系列芯片，如 M1、M2、M3、M4 等）**：选择 `macOS_Apple-Silicon.dmg` 后缀的安装包。
+- **macOS（Intel 芯片）**：选择 `macOS_Intel.dmg` 后缀的安装包。
+- **Linux（64 位 Intel / AMD）**：Debian / Ubuntu 选择 `Linux_x64.deb`，其他发行版可选择 `Linux_x64.AppImage` 后缀的安装包。
+
+旧版本中，`aarch64.dmg` 对应 macOS M 系列芯片，`x64.dmg` 对应 macOS Intel 芯片；Linux 的 `amd64` 表示 64 位 Intel / AMD 架构。`.sig`、`.app.tar.gz` 和 `latest.json` 用于自动更新，无需手动安装。
 
 ### 开发环境
 

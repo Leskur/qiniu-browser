@@ -73,16 +73,19 @@ git push origin v0.0.2
 推送 tag 后，GitHub Actions 会自动构建以下平台的安装包：
 
 ### Windows
-- `Qiniu-Browser_x.x.x_x64-setup.exe` - 安装程序
-- `Qiniu-Browser_x.x.x_x64.msi` - MSI 安装包
+- `Qiniu.Browser_x.x.x_Windows_x64_setup.exe` - 64 位 Intel / AMD 安装程序
 
 ### macOS
-- `Qiniu-Browser_x.x.x_aarch64.dmg` - Apple Silicon (M1/M2/M3)
-- `Qiniu-Browser_x.x.x_x64.dmg` - Intel 芯片
+- `Qiniu.Browser_x.x.x_macOS_Apple-Silicon.dmg` - Apple Silicon（M1、M2、M3、M4 等 M 系列芯片）
+- `Qiniu.Browser_x.x.x_macOS_Intel.dmg` - Intel 芯片
 
 ### Linux
-- `qiniu-browser_x.x.x_amd64.deb` - Debian/Ubuntu
-- `qiniu-browser_x.x.x_amd64.AppImage` - 通用格式
+- `Qiniu.Browser_x.x.x_Linux_x64.deb` - Debian / Ubuntu，64 位 Intel / AMD
+- `Qiniu.Browser_x.x.x_Linux_x64.AppImage` - AppImage 格式，64 位 Intel / AMD
+
+发布附件通过 `tauri-action` 的 `assetNamePattern` 统一命名，自动更新包及其 `.sig` 签名也使用同一规则，`latest.json` 自动引用改名后的下载地址。macOS 的自动更新包命名为 `Qiniu.Browser_x.x.x_macOS_Apple-Silicon.app.tar.gz` 或 `Qiniu.Browser_x.x.x_macOS_Intel.app.tar.gz`，手动安装请下载 `.dmg`。
+
+此命名规则在包含该配置的后续发布中生效，不会修改已经发布的附件。本地 `npm run tauri build` 仍使用 Tauri 默认产物名。旧版 macOS 安装包的 `aarch64.dmg` 对应 M 系列芯片，`x64.dmg` 对应 Intel 芯片。
 
 构建时间约 20-30 分钟。
 

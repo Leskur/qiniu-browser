@@ -40,7 +40,7 @@ cat ~/.tauri/qiniu-browser.key
 {
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi", "deb", "appimage", "dmg"],
+    "targets": ["nsis", "deb", "appimage", "dmg"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
