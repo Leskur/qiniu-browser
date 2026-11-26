@@ -2,14 +2,15 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableSor
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/lib/toast";
 import { CdnDomain, fetchCdnDomain, fetchCdnDomains, onlineCdnDomain, offlineCdnDomain, deleteCdnDomain } from "../lib/qiniu";
-import { ArrowDown, ArrowUp, ArrowUpDown, Copy, ExternalLink, FileSearch, Filter, Globe, Loader2, RefreshCw, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Copy, ExternalLink, FileSearch, Filter, Globe, Loader2, RefreshCw, Search, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { Label } from "../components/ui/label";
 import { Skeleton } from "../components/ui/skeleton";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../components/ui/sheet";
+import { Tooltip } from "../components/ui/tooltip";
+import { PageState } from "../components/PageState";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 
 type Action = "online" | "offline" | "delete";
@@ -32,7 +33,7 @@ function statusLabel(state: string) {
 
 function StatusBadge({ state }: { state: string }) {
   const value = status(state);
-  return <Badge variant={value === "failed" || value === "frozen" ? "destructive" : value === "online" ? "secondary" : "outline"}>{statusLabel(state)}</Badge>;
+  return <Badge variant={value === "failed" || value === "frozen" ? "destructive" : "secondary"}>{statusLabel(state)}</Badge>;
 }
 
 function region(value: string) {
@@ -67,9 +68,9 @@ function FilterSelect({ label, value, items, onChange }: { label: string; value:
 
 function InfoRows({ rows }: { rows: [string, string][] }) {
   return (
-    <dl className="divide-y rounded-lg border px-4">
+    <dl className="divide-y divide-border/60">
       {rows.map(([label, value]) => (
-        <div key={label} className="grid grid-cols-[6rem_1fr] gap-3 py-3 text-sm">
+        <div key={label} className="grid grid-cols-[5rem_minmax(0,1fr)] gap-3 py-3 text-xs first:pt-0 last:pb-0">
           <dt className="text-muted-foreground">{label}</dt>
           <dd className="min-w-0 break-all">{value || "-"}</dd>
         </div>
@@ -78,8 +79,9 @@ function InfoRows({ rows }: { rows: [string, string][] }) {
   );
 }
 
-export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefreshDomain, refreshTrigger }: {
+export function DomainManager({ ak, sk, isActive, selectedDomain, onSelectDomain, onRefreshDomain, refreshTrigger }: {
   ak: string; sk: string; selectedDomain: string | null;
+  isActive: boolean;
   onSelectDomain: (domain: string | null) => void;
   onRefreshDomain: (domain: string) => void; refreshTrigger?: number;
 }) {
@@ -92,9 +94,9 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
   const [descending, setDescending] = useState(false);
   const [sortField, setSortField] = useState<SortField>("name");
   const listRequest = useRef(0);
-  const [detail, setDetail] = useState<CdnDomain | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState("");
+  const [detailState, setDetailState] = useState<{
+    domain: string | null; data: CdnDomain | null; loading: boolean; error: string;
+  }>({ domain: null, data: null, loading: false, error: "" });
   const [detailVersion, setDetailVersion] = useState(0);
   const [pending, setPending] = useState<Action | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -130,16 +132,6 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
   useEffect(() => {
     if (refreshTrigger !== undefined && refreshTrigger > 0) { loadDomains(); setDetailVersion(value => value + 1); }
   }, [refreshTrigger]);
-  useEffect(() => {
-    let cancelled = false;
-    setDetail(null); setDetailError(""); setConfirmOpen(false); setConfirmation("");
-    if (!selectedDomain) { setDetailLoading(false); return; }
-    setDetailLoading(true);
-    fetchCdnDomain(ak, sk, selectedDomain).then(data => { if (!cancelled) setDetail(data); })
-      .catch(error => { if (!cancelled) setDetailError(error instanceof Error ? error.message : String(error)); })
-      .finally(() => { if (!cancelled) setDetailLoading(false); });
-    return () => { cancelled = true; };
-  }, [ak, sk, selectedDomain, detailVersion]);
 
   const isFiltered = search.trim() !== "" || statusFilter !== "all" || regionFilter !== "all";
 
@@ -150,6 +142,44 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
       && (regionFilter === "all" || region(domain.geoCover) === regionFilter))
       .sort((a, b) => (a[sortField] || "").localeCompare(b[sortField] || "") * (descending ? -1 : 1));
   }, [domains, search, statusFilter, regionFilter, descending, sortField]);
+
+  const activeDomain = isActive && visibleDomains.some(domain => domain.name === selectedDomain)
+    ? selectedDomain : null;
+  const detail = detailState.domain === activeDomain ? detailState.data : null;
+  const detailError = detailState.domain === activeDomain ? detailState.error : "";
+  const detailLoading = activeDomain !== null && (detailState.domain !== activeDomain || detailState.loading);
+
+  useEffect(() => {
+    if (selectedDomain && !activeDomain) onSelectDomain(null);
+  }, [selectedDomain, activeDomain, onSelectDomain]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setConfirmOpen(false); setConfirmation("");
+    setDetailState({ domain: activeDomain, data: null, loading: !!activeDomain, error: "" });
+    if (!activeDomain) return;
+    fetchCdnDomain(ak, sk, activeDomain).then(data => {
+      if (!cancelled) setDetailState({ domain: activeDomain, data, loading: false, error: "" });
+    }).catch(error => {
+      if (!cancelled) setDetailState({ domain: activeDomain, data: null, loading: false, error: error instanceof Error ? error.message : String(error) });
+    });
+    return () => { cancelled = true; };
+  }, [ak, sk, activeDomain, detailVersion]);
+
+  useEffect(() => {
+    if (!activeDomain || busy || confirmOpen) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      const focusedElement = document.activeElement;
+      if (focusedElement instanceof HTMLElement && focusedElement.hasAttribute("data-domain-detail-trigger")) {
+        focusedElement.blur();
+      }
+      onSelectDomain(null);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [activeDomain, busy, confirmOpen, onSelectDomain]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) setDescending(value => !value);
@@ -196,8 +226,8 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
   ] as const;
 
   return (
-    <div className="flex h-full flex-col bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-200 px-6 dark:border-zinc-800">
+    <div className="@container/domain-page flex h-full min-w-0 flex-col overflow-hidden bg-background text-foreground">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
         <Button
           variant="ghost"
           disabled={loading}
@@ -208,12 +238,12 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
           刷新
         </Button>
         {!loading && !listError && domains.length > 0 && (
-          <span className="text-xs tabular-nums text-zinc-400 dark:text-zinc-500">{countLabel}</span>
+          <span className="text-xs tabular-nums text-zinc-400 dark:text-muted-foreground">{countLabel}</span>
         )}
         <div className="flex-1" />
         <FilterSelect label="域名状态" value={statusFilter} items={statusItems} onChange={setStatusFilter} />
         <FilterSelect label="加速区域" value={regionFilter} items={regionItems} onChange={setRegionFilter} />
-        <div className="relative w-56">
+        <div className="relative w-40 @3xl/domain-page:w-56">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             aria-label="搜索域名或 CNAME"
@@ -225,84 +255,69 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
         </div>
       </div>
 
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="@container/domain-list relative flex min-h-0 min-w-0 flex-1 flex-col">
         {loading && domains.length === 0 ? (
-          <div aria-label="正在加载域名" className="flex flex-1 flex-col items-center justify-center gap-4 p-20 text-zinc-500">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-emerald-600 dark:border-zinc-800" />
-            <p className="text-sm">正在获取域名列表...</p>
-          </div>
+          <PageState loading title="正在获取域名列表..." />
         ) : listError && domains.length === 0 ? (
-          <div className="m-6 rounded-xl border border-red-200 bg-red-50 p-6 text-red-600 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
-            <div className="mb-2 font-medium">加载失败</div>
-            <div className="mb-4 break-all rounded-xs bg-red-100/50 p-2 font-mono text-xs dark:bg-red-900/20">{listError}</div>
-            <Button variant="outline" size="sm" onClick={loadDomains}>重试</Button>
-          </div>
+          <PageState error title="加载失败" description={<span className="break-all">{listError}</span>}>
+            <Button variant="secondary" size="sm" onClick={loadDomains}>重试</Button>
+          </PageState>
         ) : visibleDomains.length === 0 ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-16 text-center">
-            {isFiltered ? (
-              <>
-                <FileSearch className="size-8 text-zinc-300 dark:text-zinc-700" />
-                <p className="text-sm text-zinc-500">没有匹配的域名</p>
-              </>
-            ) : (
-              <>
-                <Globe className="size-8 text-zinc-300 dark:text-zinc-600" />
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">暂无 CDN 域名</p>
-                  <p className="text-xs text-zinc-400 dark:text-zinc-500">在七牛控制台添加域名后即可在此管理</p>
-                </div>
-              </>
-            )}
-          </div>
+          <PageState icon={isFiltered ? FileSearch : Globe}
+            title={isFiltered ? "没有匹配的域名" : "暂无 CDN 域名"}
+            description={isFiltered ? undefined : "在七牛控制台添加域名后即可在此管理"} />
         ) : (
           <div className="min-h-0 flex-1 overflow-auto">
-            <Table className="w-full whitespace-nowrap text-left text-sm">
-              <TableHeader className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50/80 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-900/80">
+            <Table className="w-full table-fixed text-left text-sm">
+              <TableHeader className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50/80 backdrop-blur-md dark:border-border dark:bg-card/90">
                 <TableRow>
                   {sortableColumns.map(({ field, label }) => (
-                    <TableHead key={field} className="p-0"
+                    <TableHead key={field} className={`p-0 ${field === "geoCover" ? "hidden w-24 @2xl/domain-list:table-cell" : field === "name" ? "" : "w-20"}`}
                       aria-sort={sortField === field ? (descending ? "descending" : "ascending") : undefined}>
-                      <TableSortButton className="px-6" onClick={() => handleSort(field)}>
+                      <TableSortButton className="px-3" onClick={() => handleSort(field)}>
                         {label}<SortIcon field={field} />
                       </TableSortButton>
                     </TableHead>
                   ))}
-                  <TableHead className="px-6 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400">CNAME</TableHead>
+                  <TableHead className="hidden px-3 py-3 text-left text-xs font-medium text-muted-foreground @3xl/domain-list:table-cell">CNAME</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+              <TableBody className="divide-y divide-zinc-100 dark:divide-border/80">
                 {visibleDomains.map(domain => (
                   <TableRow
                     key={domain.name}
-                    className="group cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
-                    onClick={() => onSelectDomain(domain.name)}
+                    className={`group cursor-default transition-colors ${activeDomain === domain.name ? "bg-accent/70 hover:bg-accent" : "hover:bg-accent/50"}`}
+                    onClick={() => { if (!busy) onSelectDomain(domain.name); }}
                   >
-                    <TableCell className="px-6 py-3">
-                      <div className="flex items-center gap-2">
-                        <button type="button"
+                    <TableCell className="px-3 py-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Tooltip content={domain.name}>
+                        <button type="button" data-domain-detail-trigger disabled={busy}
                           onClick={e => { e.stopPropagation(); onSelectDomain(domain.name); }}
-                          className="cursor-pointer text-left font-medium text-zinc-800 transition-colors group-hover:text-emerald-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-zinc-100 dark:group-hover:text-emerald-400">
+                          className="min-w-0 truncate text-left font-medium text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
                           {domain.name}
                         </button>
+                        </Tooltip>
                         {isWildcard(domain.type) && (
-                          <span className="rounded-xs px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">泛域名</span>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">泛域名</span>
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="px-6 py-3">
-                      <span className={`text-xs ${status(domain.operatingState) === "failed" || status(domain.operatingState) === "frozen" ? "text-red-500" : status(domain.operatingState) === "online" ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-500 dark:text-zinc-400"}`}>
+                    <TableCell className="px-3 py-3">
+                      <span className={`text-xs ${status(domain.operatingState) === "failed" || status(domain.operatingState) === "frozen" ? "text-red-500" : status(domain.operatingState) === "online" ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-500 dark:text-muted-foreground"}`}>
                         {statusLabel(domain.operatingState)}
                       </span>
                     </TableCell>
-                    <TableCell className="px-6 py-3 text-xs text-zinc-500 dark:text-zinc-400">
+                    <TableCell className="px-3 py-3 text-xs text-muted-foreground">
                       {domain.protocol?.toUpperCase() || "-"}
                     </TableCell>
-                    <TableCell className="px-6 py-3 text-xs text-zinc-500 dark:text-zinc-400">
+                    <TableCell className="hidden px-3 py-3 text-xs text-muted-foreground @2xl/domain-list:table-cell">
                       {regionLabel(domain.geoCover)}
                     </TableCell>
-                    <TableCell className="px-6 py-3">
-                      <div className="flex items-center gap-1">
-                        <code className="text-xs text-zinc-500 dark:text-zinc-400">{domain.cname || "-"}</code>
+                    <TableCell className="hidden px-3 py-3 @3xl/domain-list:table-cell">
+                      <div className="flex min-w-0 items-center gap-1">
+                        <Tooltip content={domain.cname}><code className="min-w-0 truncate text-xs text-muted-foreground">{domain.cname || "-"}</code></Tooltip>
                         {domain.cname && (
                           <Button
                             type="button"
@@ -325,13 +340,14 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
         )}
       </div>
 
-      <Sheet open={!!selectedDomain} onOpenChange={open => { if (!open && !busy) onSelectDomain(null); }}>
-        <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-xl" showCloseButton={!busy}>
-          <SheetHeader className="border-b pr-12">
-            <SheetTitle>域名详情</SheetTitle>
-            <SheetDescription className="break-all">{selectedDomain}</SheetDescription>
-          </SheetHeader>
-          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 pb-6">
+      {activeDomain && (
+        <aside aria-label="域名详情" className="flex min-h-0 w-80 shrink-0 flex-col border-l border-border bg-background text-foreground">
+          <div className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-4">
+            <Globe className="size-4 shrink-0 text-muted-foreground" />
+            <Tooltip content={activeDomain}><h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{activeDomain}</h2></Tooltip>
+            <Button variant="ghost" size="icon-sm" disabled={busy} title="关闭域名详情" aria-label="关闭域名详情" onClick={() => onSelectDomain(null)}><X /></Button>
+          </div>
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-4 text-sm">
             {detailLoading ? (
               <div className="space-y-3" aria-label="正在加载域名详情">
                 <Skeleton className="h-10 w-full" />
@@ -346,14 +362,14 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
               <>
                 <div className="flex items-center gap-2">
                   <StatusBadge state={detail.operatingState} />
-                  <Badge variant="outline">{isWildcard(detail.type) ? "泛域名" : "普通域名"}</Badge>
+                  <span className="text-xs text-muted-foreground">{isWildcard(detail.type) ? "泛域名" : "普通域名"}</span>
                 </div>
                 {detail.operatingStateDesc && <p className="text-sm text-muted-foreground">{detail.operatingStateDesc}</p>}
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" onClick={() => copy(detail.name, "域名")}><Copy />复制域名</Button>
-                  <Button variant="outline" size="sm" onClick={() => { onSelectDomain(null); onRefreshDomain(detail.name); }}>刷新缓存</Button>
+                <div className="divide-y divide-border overflow-hidden rounded-xl bg-muted/50">
+                  <Button variant="ghost" className="h-auto w-full justify-start rounded-none border-0 px-3 py-2.5" onClick={() => copy(detail.name, "域名")}><Copy />复制域名</Button>
+                  <Button variant="ghost" className="h-auto w-full justify-start rounded-none border-0 px-3 py-2.5" disabled={busy} onClick={() => { onSelectDomain(null); onRefreshDomain(detail.name); }}>刷新缓存</Button>
                   {!isWildcard(detail.type) && (
-                    <Button variant="outline" size="sm" nativeButton={false} render={<a href={`${detail.protocol === "https" ? "https" : "http"}://${detail.name}`} target="_blank" rel="noopener noreferrer" />}>
+                    <Button variant="ghost" className="h-auto w-full justify-start rounded-none border-0 px-3 py-2.5" nativeButton={false} render={<a href={`${detail.protocol === "https" ? "https" : "http"}://${detail.name}`} target="_blank" rel="noopener noreferrer" />}>
                       <ExternalLink />访问域名
                     </Button>
                   )}
@@ -371,7 +387,7 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
                 </section>
                 <section className="space-y-3">
                   <h3 className="font-medium">CNAME</h3>
-                  <div className="flex items-center gap-2 rounded-lg border p-3">
+                  <div className="flex items-start gap-2">
                     <code className="min-w-0 flex-1 break-all text-xs">{detail.cname || "尚未分配"}</code>
                     <Button variant="ghost" size="icon-sm" disabled={!detail.cname} aria-label="复制 CNAME" onClick={() => copy(detail.cname, " CNAME")}><Copy /></Button>
                   </div>
@@ -394,12 +410,12 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
                     ["HTTP/2", detail.https?.http2Enable === undefined ? "-" : detail.https.http2Enable ? "已开启" : "未开启"],
                   ]} />
                 </section>
-                <section className="space-y-3 border-t pt-4">
+                <section className="space-y-3">
                   <h3 className="font-medium">域名操作</h3>
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" disabled={busy || status(detail.operatingState) !== "offline"} onClick={() => { setPending("online"); setConfirmOpen(true); }}>上线域名</Button>
-                    <Button variant="outline" disabled={busy || status(detail.operatingState) !== "online"} onClick={() => { setPending("offline"); setConfirmOpen(true); }}>下线域名</Button>
-                    <Button variant="destructive" disabled={busy || status(detail.operatingState) !== "offline"} onClick={() => { setPending("delete"); setConfirmation(""); setConfirmOpen(true); }}>删除域名</Button>
+                  <div className="divide-y divide-border overflow-hidden rounded-xl bg-muted/50">
+                    <Button variant="ghost" className="h-auto w-full justify-start rounded-none border-0 px-3 py-2.5" disabled={busy || status(detail.operatingState) !== "offline"} onClick={() => { setPending("online"); setConfirmOpen(true); }}>上线域名</Button>
+                    <Button variant="ghost" className="h-auto w-full justify-start rounded-none border-0 px-3 py-2.5" disabled={busy || status(detail.operatingState) !== "online"} onClick={() => { setPending("offline"); setConfirmOpen(true); }}>下线域名</Button>
+                    <Button variant="ghost" className="h-auto w-full justify-start rounded-none border-0 px-3 py-2.5 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy || status(detail.operatingState) !== "offline"} onClick={() => { setPending("delete"); setConfirmation(""); setConfirmOpen(true); }}>删除域名</Button>
                   </div>
                   <p className="text-xs text-muted-foreground">下线会停止 CDN 加速服务。删除前需先下线域名。</p>
                 </section>
@@ -428,8 +444,9 @@ export function DomainManager({ ak, sk, selectedDomain, onSelectDomain, onRefres
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </SheetContent>
-      </Sheet>
+        </aside>
+      )}
+      </div>
     </div>
   );
 }

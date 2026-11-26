@@ -13,6 +13,9 @@
     "windows": [
       {
         "title": "Qiniu Browser",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 12, "y": 16 },
         "width": 1200,
         "height": 750,
         "minWidth": 1080,

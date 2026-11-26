@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -233,14 +232,7 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-zinc-50 text-foreground dark:bg-zinc-950">
-      <header className="flex h-16 shrink-0 items-center justify-between px-6 sm:px-8">
-        <div className="flex items-center gap-2.5">
-          <img src="/app-icon.png" alt="" className="size-7 rounded-lg object-contain" />
-          <span className="text-sm font-semibold tracking-tight">Qiniu Browser</span>
-        </div>
-        <ThemeSwitcher />
-      </header>
+    <div className="relative flex min-h-full flex-col bg-zinc-50 text-foreground dark:bg-background">
       <div className="flex flex-1 items-center justify-center px-5 pb-16 pt-6">
       <section aria-labelledby="login-title" className="w-full max-w-sm">
         <div className="mb-6">
@@ -266,7 +258,7 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                   <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-xl border bg-background p-1">
+                <div className="overflow-hidden rounded-xl bg-background p-1">
                   <div id="saved-accounts" role="group" aria-label="已保存账号" className="max-h-42 overflow-y-auto overscroll-contain">
                   {historyItems.map((item) => {
                     const isLoading = loggingInKey === item.accessKey;
@@ -280,10 +272,10 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                           type="button"
                           disabled={loggingInKey !== null}
                           onClick={() => handleSelectHistory(item)}
-                          className="h-auto p-0 flex h-14 min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
+                          className="h-auto p-0 flex h-14 min-w-0 flex-1 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-left text-foreground outline-none hover:bg-transparent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:opacity-60"
                         >
                         {/* Avatar */}
-                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-emerald-600/10 bg-emerald-50 text-xs font-semibold text-emerald-700 dark:border-emerald-400/10 dark:bg-emerald-400/10 dark:text-emerald-400">
+                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-semibold text-muted-foreground">
                           {(item.description || item.accessKey).charAt(0).toUpperCase()}
                         </div>
 
@@ -295,14 +287,14 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
 
                         {/* Right side */}
                         {isLoading ? (
-                          <Loader2 className="w-4 h-4 animate-spin text-emerald-500 shrink-0" />
+                          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground shrink-0" />
                         ) : null}
                         </Button>
                             <Button variant="ghost"
                               type="button"
                               onClick={(e) => handleDeleteHistory(e, item.accessKey)}
                               disabled={loggingInKey !== null}
-                              className="h-auto p-0 mr-2 rounded-md p-2 text-muted-foreground/50 opacity-0 pointer-events-none transition-[color,background-color,opacity] group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+                              className="h-auto p-0 mr-2 rounded-md p-2 text-muted-foreground/50 opacity-0 pointer-events-none transition-[color,background-color,opacity] group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto hover:bg-transparent hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
                               title="移除已保存账号"
                               aria-label={`移除${item.description || "未命名账号"}`}
                             >
@@ -388,7 +380,7 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
                     checked={rememberMe}
                     onCheckedChange={(checked) => setRememberMe(checked === true)}
                   />
-                  <Label htmlFor="remember" className="text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer">
+                  <Label htmlFor="remember" className="text-sm text-zinc-600 dark:text-muted-foreground cursor-default">
                     记住凭证
                   </Label>
                 </div>
@@ -396,7 +388,7 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
               <Button
                 type="submit"
                 disabled={isLoggingIn || !ak || !sk}
-                className="h-10 w-full cursor-pointer"
+                className="h-10 w-full cursor-default"
               >
                 {isLoggingIn ? (
                   <><Loader2 className="w-4 h-4 animate-spin mr-2" />验证中...</>
@@ -425,7 +417,7 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
             <DialogDescription>选择要导入的账号。相同 AccessKey 的已保存记录将被更新。</DialogDescription>
           </DialogHeader>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <Label className="cursor-pointer gap-2 font-normal">
+            <Label className="cursor-default gap-2 font-normal">
               <Checkbox
                 aria-label="全选账号"
                 checked={kodoItems.length > 0 && selectedKodoKeys.size === kodoItems.length}
@@ -439,7 +431,7 @@ export function Login({ onLogin }: { onLogin: (ak: string, sk: string, descripti
           </div>
           <div className="max-h-[min(18rem,40vh)] space-y-1 overflow-y-auto rounded-lg border p-1">
             {kodoItems.map(item => (
-              <Label key={item.accessKey} className={`flex cursor-pointer items-center gap-3 rounded-md p-2.5 hover:bg-muted ${selectedKodoKeys.has(item.accessKey) ? "bg-primary/5" : ""}`}>
+              <Label key={item.accessKey} className={`flex cursor-default items-center gap-3 rounded-md p-2.5 hover:bg-muted ${selectedKodoKeys.has(item.accessKey) ? "bg-primary/5" : ""}`}>
                 <Checkbox
                   aria-label={`选择${item.description || item.accessKey}`}
                   checked={selectedKodoKeys.has(item.accessKey)}

@@ -8,13 +8,14 @@ import {
   RefreshTask,
   PrefetchTask 
 } from "../lib/cdn";
-import { CalendarIcon, History, Loader2, X } from "lucide-react";
+import { CalendarIcon, History, X } from "lucide-react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
 import { Calendar } from "../components/ui/calendar";
 import { Popover, PopoverTrigger, PopoverContent } from "../components/ui/popover";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
 import { Button } from "../components/ui/button";
+import { PageState } from "../components/PageState";
 import { Badge } from "../components/ui/badge";
 import { Label } from "../components/ui/label";
 import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
@@ -281,7 +282,7 @@ export function CdnManager({
   };
 
   return (
-    <div className="h-full flex flex-col bg-white dark:bg-zinc-950">
+    <div className="h-full flex flex-col bg-white dark:bg-background">
       <div className="flex-1 overflow-y-auto p-6">
         <Tabs
           value={subTab}
@@ -306,7 +307,7 @@ export function CdnManager({
             /* Task History */
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+                <h3 className="text-sm font-semibold text-zinc-700 dark:text-foreground">
                   操作记录
                   {!loadingTasks && !tasksError && total > 0 && (
                     <span className="ml-2 text-xs font-normal text-zinc-400">共 {total} 条</span>
@@ -381,48 +382,39 @@ export function CdnManager({
               )}
 
               {loadingTasks ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
-                </div>
+                <PageState loading title="正在加载操作记录..." />
               ) : tasksError ? (
-                <div role="alert" className="rounded-lg border border-destructive/30 p-4">
-                  <p className="text-sm font-medium text-destructive">加载操作记录失败</p>
-                  <p className="my-2 break-all text-sm text-muted-foreground">{tasksError}</p>
-                  <Button variant="outline" size="sm" onClick={() => {
+                <PageState error title="加载操作记录失败" description={<span className="break-all">{tasksError}</span>}>
+                  <Button variant="secondary" size="sm" onClick={() => {
                     if (lastQuery.current) void loadTasks(lastQuery.current);
                   }}>重试</Button>
-                </div>
+                </PageState>
               ) : tasks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <History className="w-16 h-16 text-zinc-300 dark:text-zinc-700 mb-4" />
-                  <p className="text-zinc-500 dark:text-zinc-400">
-                    {queryRequestId ? "该 RequestID 下暂无操作记录" : "暂无操作记录"}
-                  </p>
+                <PageState icon={History} title={queryRequestId ? "该 RequestID 下暂无操作记录" : "暂无操作记录"}>
                   {queryRequestId && (
                     <Button
                       type="button"
-                      variant="link"
+                      variant="secondary"
                       size="sm"
                       onClick={() => loadTasks({ requestId: undefined, page: 0 })}
-                      className="mt-3"
                     >
                       查看全部记录
                     </Button>
                   )}
-                </div>
+                </PageState>
               ) : (
-                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
+                <div className="overflow-hidden">
                   <Table className="w-full">
-                    <TableHeader className="bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
+                    <TableHeader className="border-b border-border bg-muted/40">
                       <TableRow>
-                        <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400">URL</TableHead>
-                        <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap w-28">刷新类型</TableHead>
-                        <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap w-24">状态</TableHead>
-                        <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap w-40">提交时间</TableHead>
-                        <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap w-32">耗时</TableHead>
+                        <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-muted-foreground">URL</TableHead>
+                        <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-muted-foreground whitespace-nowrap w-28">刷新类型</TableHead>
+                        <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-muted-foreground whitespace-nowrap w-24">状态</TableHead>
+                        <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-muted-foreground whitespace-nowrap w-40">提交时间</TableHead>
+                        <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-muted-foreground whitespace-nowrap w-32">耗时</TableHead>
                       </TableRow>
                     </TableHeader>
-                    <TableBody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    <TableBody className="divide-y divide-zinc-100 dark:divide-border">
                       {tasks.map((task, index) => {
                         const rowKey = task.taskId || task.id || `${task.url}-${task.createAt}-${index}`;
                         // Use the server's operation type; a trailing slash can also be a file URL.
@@ -431,9 +423,9 @@ export function CdnManager({
                           : isDir === "yes" ? "目录"
                           : isDir === "no" ? "文件" : "未知类型";
                         return (
-                        <TableRow key={rowKey} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors">
+                        <TableRow key={rowKey} className="hover:bg-zinc-50 dark:hover:bg-muted/60 transition-colors">
                           <TableCell className="px-4 py-3 whitespace-normal">
-                            <code className="text-xs font-mono text-zinc-600 dark:text-zinc-400 break-all">
+                            <code className="text-xs font-mono text-zinc-600 dark:text-muted-foreground break-all">
                               {task.url}
                             </code>
                           </TableCell>
@@ -444,7 +436,7 @@ export function CdnManager({
                             {getStateBadge(task.state)}
                           </TableCell>
                           <TableCell className="px-4 py-3 w-40">
-                            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                            <span className="text-xs text-zinc-500 dark:text-muted-foreground">
                               {task.createAt || '-'}
                             </span>
                           </TableCell>

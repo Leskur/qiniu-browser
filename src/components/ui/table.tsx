@@ -83,7 +83,7 @@ function TableSortButton({ className, ...props }: React.ComponentProps<"button">
     <button
       type="button"
       className={cn(
-        "flex h-full min-h-10 w-full cursor-pointer items-center gap-1 px-2 text-left text-xs font-medium text-zinc-500 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring dark:text-zinc-400 dark:hover:bg-zinc-800/50",
+        "flex h-full min-h-10 w-full cursor-default items-center gap-1 px-2 text-left text-xs font-medium text-zinc-500 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring dark:text-muted-foreground dark:hover:bg-accent/50",
         className
       )}
       {...props}

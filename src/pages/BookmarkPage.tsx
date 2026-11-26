@@ -4,6 +4,8 @@ import { Bookmark as BookmarkIcon, Pencil, Search, Trash2, X } from "lucide-reac
 import { toast } from "@/lib/toast";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
+import { Tooltip } from "../components/ui/tooltip";
+import { PageState } from "../components/PageState";
 import { Label } from "../components/ui/label";
 import {
   Dialog,
@@ -46,22 +48,14 @@ export function BookmarkPage({
 
   if (bookmarks.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-12 text-center">
-        <BookmarkIcon className="size-8 text-zinc-300 dark:text-zinc-600" />
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">还没有书签</p>
-          <p className="max-w-xs text-xs text-zinc-400 dark:text-zinc-500">
-            在文件管理页点击书签按钮，保存常用路径以便快速访问
-          </p>
-        </div>
-      </div>
+      <PageState icon={BookmarkIcon} title="还没有书签" description="在文件管理页点击书签按钮，保存常用路径以便快速访问" />
     );
   }
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-200 px-6 dark:border-zinc-800">
-        <span className="text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-200 px-6 dark:border-border">
+        <span className="text-xs tabular-nums text-zinc-400 dark:text-muted-foreground">
           {searchQuery ? `${filtered.length} / ${bookmarks.length} 个书签` : `${bookmarks.length} 个书签`}
         </span>
         <div className="flex-1" />
@@ -79,7 +73,7 @@ export function BookmarkPage({
             <Button variant="ghost"
               type="button"
               onClick={() => setSearchQuery("")}
-              className="h-auto p-0 absolute right-2 top-1/2 -translate-y-1/2 rounded-xs p-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              className="h-auto p-0 absolute right-2 top-1/2 -translate-y-1/2 rounded-xs p-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-accent dark:hover:text-zinc-200"
               aria-label="清除搜索"
             >
               <X className="size-3" />
@@ -90,30 +84,29 @@ export function BookmarkPage({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 p-16 text-center">
-            <Search className="size-8 text-zinc-300 dark:text-zinc-700" />
-            <p className="text-sm text-zinc-500">没有匹配的书签</p>
-          </div>
+          <PageState icon={Search} title="没有匹配的书签" />
         ) : (
-          <div className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+          <div className="divide-y divide-zinc-100 dark:divide-border/80">
             {filtered.map((bm) => {
               const path = `${bm.bucket}${bm.prefix ? "/" + bm.prefix.replace(/\/$/, "") : ""}`;
               return (
                 <div
                   key={bm.id}
-                  className="group flex items-center gap-3 px-6 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
+                  className="group flex items-center gap-3 px-6 transition-colors hover:bg-zinc-50 dark:hover:bg-accent/50"
                 >
                   <button type="button"
                     onClick={() => onNavigate(bm.bucket, bm.prefix)}
-                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-3 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
-                    <BookmarkIcon className="size-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
+                    className="flex min-w-0 flex-1 cursor-default items-center gap-3 py-3 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+                    <BookmarkIcon className="size-4 shrink-0 text-zinc-400 dark:text-muted-foreground" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-zinc-800 transition-colors group-hover:text-emerald-600 dark:text-zinc-100 dark:group-hover:text-emerald-400">
+                      <span className="block truncate text-sm font-medium text-zinc-800 transition-colors dark:text-foreground">
                         {bm.label}
                       </span>
-                      <span className="mt-0.5 block truncate font-mono text-xs text-zinc-400 dark:text-zinc-500" title={path}>
-                        {path}
-                      </span>
+                      <Tooltip content={path}>
+                        <span className="mt-0.5 block truncate font-mono text-xs text-zinc-400 dark:text-muted-foreground">
+                          {path}
+                        </span>
+                      </Tooltip>
                     </span>
                   </button>
                   <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">

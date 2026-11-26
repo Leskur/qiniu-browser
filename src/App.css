@@ -50,20 +50,21 @@
 }
 
 :root {
+    --window-titlebar-height: 0px;
     --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
+    --foreground: #0d0d0d;
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.145 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.588 0.15 166.5);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
+    --primary: #0d0d0d;
+    --primary-foreground: #ffffff;
+    --secondary: #f4f4f4;
+    --secondary-foreground: #0d0d0d;
+    --muted: #f4f4f4;
+    --muted-foreground: #6e6e6e;
+    --accent: #ececec;
+    --accent-foreground: #0d0d0d;
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
@@ -74,53 +75,70 @@
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
     --radius: 0.4375rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.588 0.15 166.5);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --sidebar: #f9f9f9;
+    --sidebar-foreground: #0d0d0d;
+    --sidebar-primary: #0d0d0d;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #eaeaea;
+    --sidebar-accent-foreground: #0d0d0d;
+    --sidebar-border: #e5e5e5;
+    --sidebar-ring: #8f8f8f;
+}
+
+:root:has([data-slot="window-titlebar"]) {
+    --window-titlebar-height: calc(var(--spacing) * 9);
+}
+
+:root:has([data-slot="window-titlebar"][data-platform="macos"]) {
+    --window-titlebar-height: calc(var(--spacing) * 11);
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.688 0.15 166.5);
-    --primary-foreground: oklch(0.145 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
+    --background: #212121;
+    --foreground: #ececec;
+    --card: #2f2f2f;
+    --card-foreground: #ececec;
+    --popover: #2f2f2f;
+    --popover-foreground: #ececec;
+    --primary: #ececec;
+    --primary-foreground: #212121;
+    --secondary: #2f2f2f;
+    --secondary-foreground: #ececec;
+    --muted: #303030;
+    --muted-foreground: #b4b4b4;
+    --accent: #3a3a3a;
+    --accent-foreground: #ececec;
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    --ring: #8f8f8f;
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.688 0.15 166.5);
-    --sidebar-primary-foreground: oklch(0.145 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar: #2b2b2b;
+    --sidebar-foreground: #ececec;
+    --sidebar-primary: #ececec;
+    --sidebar-primary-foreground: #2b2b2b;
+    --sidebar-accent: #3a3a3a;
+    --sidebar-accent-foreground: #ececec;
     --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar-ring: #8f8f8f;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    cursor: default;
+  }
+  input:where(:not([type]), [type="text"], [type="search"], [type="password"], [type="email"], [type="url"], [type="tel"], [type="number"]):not(:disabled),
+  textarea:not(:disabled),
+  [contenteditable="true"],
+  [contenteditable="true"] *,
+  [contenteditable="plaintext-only"],
+  [contenteditable="plaintext-only"] * {
+    cursor: text;
   }
   body {
     @apply bg-background text-foreground;
@@ -156,9 +174,9 @@
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: rgb(82 82 91);
+  background: #565656;
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: rgb(113 113 122);
+  background: #737373;
 }

@@ -1,4 +1,5 @@
 mod accounts;
+mod appearance;
 mod filesystem;
 mod qiniu_http;
 mod transfers;
@@ -44,6 +45,18 @@ pub fn run() {
             transfers::download::download_file,
             transfers::download::download_files_to_dir,
         ])
+        .setup(|app| {
+            #[cfg(windows)]
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    appearance::configure_titlebar(&window)?;
+                }
+            }
+            #[cfg(not(windows))]
+            let _ = app;
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

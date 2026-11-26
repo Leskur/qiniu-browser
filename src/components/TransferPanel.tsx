@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { retryFailedUploads, uploadsActive } from "../lib/upload-retry";
 import { memo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -72,19 +73,15 @@ const TaskItemView = memo(function TaskItemView({
     : 0;
 
   return (
-    <div className="group px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800">
+    <div className="group px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-accent/50 border-b border-zinc-100 dark:border-border">
       <div className="flex items-start gap-2.5">
-        <div className={`p-1.5 rounded-lg shrink-0 ${
-          task.type === 'upload'
-            ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
-            : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-        }`}>
+        <div className="p-1.5 rounded-lg shrink-0 bg-muted text-muted-foreground">
           <Icon className="w-3.5 h-3.5" />
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2 mb-1">
-            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+            <p className="text-sm font-medium text-zinc-900 dark:text-foreground truncate">
               {task.fileName}
             </p>
             {StatusIcon && (
@@ -92,14 +89,14 @@ const TaskItemView = memo(function TaskItemView({
                 task.status === 'completed' ? 'text-emerald-500' :
                 task.status === 'failed' ? 'text-red-500' :
                 (task.status === 'cancelled' || task.status === 'skipped') ? 'text-zinc-400' :
-                'text-blue-500 animate-spin'
+                'text-muted-foreground animate-spin'
               }`} />
             )}
           </div>
 
           {failure && (
             <div className="mb-1 flex min-w-0 items-center gap-1 text-red-500">
-              <p className="min-w-0 truncate text-xs" title={failure}>{failure}</p>
+              <Tooltip content={failure}><p className="min-w-0 truncate text-xs">{failure}</p></Tooltip>
               <Button type="button" variant="ghost" size="icon-xs" title="复制失败原因"
                 aria-label={`复制 ${task.fileName} 的失败原因`} onClick={() => void copyTaskError(failure)}>
                 <Copy />
@@ -113,15 +110,13 @@ const TaskItemView = memo(function TaskItemView({
           )}
           {task.status === 'transferring' && (
             <>
-              <div className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden mb-1.5">
+              <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden mb-1.5">
                 <div
-                  className={`h-full ${
-                    task.type === 'upload' ? 'bg-emerald-500' : 'bg-blue-500'
-                  }`}
+                  className="h-full bg-primary"
                   style={{ width: `${Math.min(100, Math.max(0, task.progress))}%` }}
                 />
               </div>
-              <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+              <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-muted-foreground">
                 <span>
                   {formatBytes(task.transferredSize)} / {formatBytes(task.totalSize)}
                   {task.speed && task.speed > 0 && ` · ${formatSpeed(task.speed)}`}
@@ -134,22 +129,22 @@ const TaskItemView = memo(function TaskItemView({
           )}
 
           {task.status === 'completed' && (
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            <p className="text-xs text-zinc-500 dark:text-muted-foreground">
               {formatBytes(task.totalSize)}
               {task.endTime != null && ` · 用时 ${formatTime((task.endTime - task.startTime) / 1000)}`}
             </p>
           )}
 
           {task.status === 'pending' && (
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">等待中...</p>
+            <p className="text-xs text-zinc-500 dark:text-muted-foreground">等待中...</p>
           )}
         </div>
 
-        {onRetry && <Button variant="ghost" onClick={onRetry} title="重试上传" aria-label={`重试上传 ${task.fileName}`} className="h-auto p-0 shrink-0 rounded-xs p-1 text-emerald-600 hover:bg-emerald-50"><RotateCw className="size-4" /></Button>}
+        {onRetry && <Button variant="ghost" onClick={onRetry} title="重试上传" aria-label={`重试上传 ${task.fileName}`} className="h-auto shrink-0 rounded-md p-1 text-muted-foreground"><RotateCw className="size-4" /></Button>}
         {onRemove && (
           <Button variant="ghost"
             onClick={onRemove}
-            className="h-auto p-0 opacity-0 group-hover:opacity-100 p-1 rounded-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 shrink-0"
+            className="h-auto p-0 opacity-0 group-hover:opacity-100 p-1 rounded-xs hover:bg-zinc-200 dark:hover:bg-accent shrink-0"
             title="移除"
           >
             <X className="w-3.5 h-3.5 text-zinc-500" />
@@ -252,22 +247,22 @@ export function TransferPanel() {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 w-96 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden z-50">
+    <div className="fixed bottom-4 right-4 w-96 bg-popover text-popover-foreground rounded-xl shadow-md overflow-hidden z-50">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-foreground">
             传输任务
           </h3>
           {summary.active > 0 && (
-            <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xs">
+            <span className="text-xs text-muted-foreground">
               {summary.active} 进行中
             </span>
           )}
         </div>
 
         <div className="flex items-center gap-1">
-          {summary.retryable > 0 && summary.uploadActive === 0 && <Button variant="ghost" title="重试全部失败上传" aria-label="重试全部失败上传" onClick={() => { if (!uploadsActive()) void retryFailedUploads(); }} className="h-auto p-0 rounded-xs p-1.5 text-emerald-600 hover:bg-emerald-50"><RotateCw className="size-4" /></Button>}
+          {summary.retryable > 0 && summary.uploadActive === 0 && <Button variant="ghost" title="重试全部失败上传" aria-label="重试全部失败上传" onClick={() => { if (!uploadsActive()) void retryFailedUploads(); }} className="h-auto rounded-md p-1.5 text-muted-foreground"><RotateCw className="size-4" /></Button>}
           {summary.uploadActive > 0 && (
             <Button variant="ghost"
               onClick={handleStopAll}
@@ -281,7 +276,7 @@ export function TransferPanel() {
           {taskIds.length > summary.active && (
             <Button variant="ghost"
               onClick={clearInactive}
-              className="h-auto p-0 p-1.5 rounded-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+              className="h-auto p-0 p-1.5 rounded-xs hover:bg-zinc-200 dark:hover:bg-accent transition-colors"
               title="清除已结束的任务记录"
               aria-label="清除已结束的任务记录"
             >
@@ -299,23 +294,23 @@ export function TransferPanel() {
 
       {/* Overall upload progress */}
       {isPanelOpen && showOverall && (
-        <div className="px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-emerald-50/50 dark:bg-emerald-950/20">
+        <div className="px-4 py-2.5 border-b border-border/60">
           <div className="flex items-center justify-between text-xs mb-1.5">
-            <span className="font-medium text-emerald-700 dark:text-emerald-400">
+            <span className="font-medium text-foreground">
               上传总进度
             </span>
-            <span className="tabular-nums text-zinc-500 dark:text-zinc-400">
+            <span className="tabular-nums text-zinc-500 dark:text-muted-foreground">
               {summary.uploadDone + summary.uploadFailed}/{summary.uploadCount} 个
               · {summary.uploadPercent.toFixed(0)}%
             </span>
           </div>
-          <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
+          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
             <div
-              className="h-full bg-emerald-500"
+              className="h-full bg-primary"
               style={{ width: `${Math.min(100, Math.max(0, summary.uploadPercent))}%` }}
             />
           </div>
-          <div className="mt-1 text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
+          <div className="mt-1 text-[11px] tabular-nums text-zinc-500 dark:text-muted-foreground">
             {formatBytes(summary.uploadTransferred)} / {formatBytes(summary.uploadTotal)}
           </div>
         </div>
@@ -349,7 +344,7 @@ export function TransferPanel() {
 
       {/* Summary when collapsed */}
       {!isPanelOpen && (
-        <div className="px-4 py-2 text-xs text-zinc-500 dark:text-zinc-400">
+        <div className="px-4 py-2 text-xs text-zinc-500 dark:text-muted-foreground">
           {collapsedSummary}
         </div>
       )}

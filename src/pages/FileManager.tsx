@@ -10,7 +10,7 @@ import { QiniuFile, deleteFile, deleteDirectory, generateDownloadUrl, batchDelet
 import {
   File, Image, Film, FileText, Archive,
   Link2, Copy, Check, RefreshCw, Trash2, Upload, FolderOpen,
-  Folder, ChevronRight, AlertCircle, Database, Download, X, ArrowUpDown, ArrowUp, ArrowDown, Pencil, ArrowLeft, ArrowRight,
+  Folder, ChevronRight, Database, Download, X, ArrowUpDown, ArrowUp, ArrowDown, Pencil, ArrowLeft, ArrowRight,
   Search, FolderPlus, ZoomIn, ChevronLeft, Maximize2, Bookmark, Loader2, ChevronDown
 } from "lucide-react";
 import { toast } from "@/lib/toast";
@@ -18,10 +18,11 @@ import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
 import { formatBytes, formatQiniuTime } from "../lib/utils";
 import { Button } from "../components/ui/button";
+import { Tooltip } from "../components/ui/tooltip";
+import { PageState } from "../components/PageState";
 import { Input } from "../components/ui/input";
 import { Switch } from "../components/ui/switch";
 import { Checkbox } from "../components/ui/checkbox";
-import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
 import { Table, TableHead, TableHeader, TableRow, TableSortButton } from "../components/ui/table";
 import { Popover, PopoverTrigger, PopoverContent } from "../components/ui/popover";
 
@@ -53,8 +54,9 @@ type VirtualEntry =
   | { type: 'folder'; name: string; prefix: string }
   | { type: 'file'; name: string; file: QiniuFile };
 
-export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPrefix, onInitialPrefixUsed }: {
+export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, initialPrefix, onInitialPrefixUsed }: {
   ak: string; sk: string; bucket: string; onBack: () => void; refreshTrigger?: number;
+  isActive: boolean;
   initialPrefix?: string; onInitialPrefixUsed?: () => void;
 }) {
   const domains = useBucketDomains(ak, sk, bucket);
@@ -94,7 +96,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   };
 
   const goBack = useCallback(() => {
-    setSelectedFile(null);
+    setSelectedFileKey(null);
     if (!canGoBack) {
       onBack();
       return;
@@ -164,8 +166,15 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
   const [lastRefreshTime, setLastRefreshTime] = useState(0);
   const REFRESH_COOLDOWN = 2000; // 2 seconds
 
-  // ── Detail modal state ──
-  const [selectedFile, setSelectedFile] = useState<QiniuFile | null>(null);
+  // Detail belongs to the active file list, never to a stale file snapshot.
+  const [selectedFileKey, setSelectedFileKey] = useState<string | null>(null);
+  const selectedFile = isActive && !loading && !error && selectedFileKey !== null
+    ? items.find(file => file.key === selectedFileKey) ?? null
+    : null;
+
+  useEffect(() => {
+    if (selectedFileKey !== null && !selectedFile) setSelectedFileKey(null);
+  }, [selectedFileKey, selectedFile]);
 
   // ── Image preview state ──
   const [previewFile, setPreviewFile] = useState<QiniuFile | null>(null);
@@ -283,7 +292,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     const filename = file.key.split('/').pop() || file.key;
     setRenamingKey(file.key);
     setRenameValue(filename);
-    setSelectedFile(null);
+    setSelectedFileKey(null);
   };
 
   const commitRename = async (oldKey: string) => {
@@ -335,7 +344,15 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || previewFile) return;
       if (ctxMenu) { closeCtxMenu(); return; }
-      if (selectedFile) { setSelectedFile(null); return; }
+      if (selectedFile) {
+        e.preventDefault();
+        const focusedElement = document.activeElement;
+        if (focusedElement instanceof HTMLElement && focusedElement.hasAttribute('data-file-detail-trigger')) {
+          focusedElement.blur();
+        }
+        setSelectedFileKey(null);
+        return;
+      }
       if (searchInput || committedSearch) { clearSearch(); return; }
     };
     window.addEventListener('keydown', handler);
@@ -622,7 +639,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="relative flex h-full flex-col overflow-hidden bg-white dark:bg-zinc-950">
+    <div className="@container/file-page relative flex h-full min-w-0 flex-col overflow-hidden bg-white dark:bg-background">
       <Dialog open={downloadPrompt !== null} onOpenChange={(open) => { if (!open) finishDownloadPrompt(false); }}>
         <DialogContent>
           <DialogHeader>
@@ -645,18 +662,18 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
             <dl className="grid gap-3 rounded-lg border bg-muted/40 p-3 text-sm">
               <div className="min-w-0">
                 <dt className="text-xs text-muted-foreground">本地路径</dt>
-                <dd className="truncate" title={uploadChoice.sourcePath}>{uploadChoice.sourcePath}</dd>
+                <Tooltip content={uploadChoice.sourcePath}><dd className="truncate">{uploadChoice.sourcePath}</dd></Tooltip>
                 {uploadChoice.selectionCount > 1 && <dd className="text-xs text-muted-foreground">另有 {uploadChoice.selectionCount - 1} 项</dd>}
               </div>
               <div className="min-w-0">
                 <dt className="text-xs text-muted-foreground">上传到</dt>
-                <dd className="truncate" title={uploadChoice.destination}>{uploadChoice.destination}</dd>
+                <Tooltip content={uploadChoice.destination}><dd className="truncate">{uploadChoice.destination}</dd></Tooltip>
               </div>
             </dl>
           )}
           <div className="flex items-center justify-between gap-4">
             <div className="grid gap-1">
-              <Label className="cursor-pointer text-sm font-medium" htmlFor="overwrite-upload">覆盖上传</Label>
+              <Label className="cursor-default text-sm font-medium" htmlFor="overwrite-upload">覆盖上传</Label>
               <p id="overwrite-upload-hint" className="text-xs text-muted-foreground">开启后替换云端同名文件，仅本次生效。</p>
             </div>
             <Switch
@@ -672,8 +689,84 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
 
       {/* ── Top Bar ── */}
-      <div className="relative z-20 shrink-0 border-b border-zinc-200 dark:border-zinc-800">
-        <div className="flex h-12 items-center gap-2 px-6">
+      <div className="relative z-20 shrink-0 border-b border-zinc-200 dark:border-border">
+        {/* ── Path row ── */}
+        <div className="flex min-w-0 items-center gap-1 overflow-x-auto px-6 py-2">
+          <Button variant="ghost"
+            type="button"
+            onClick={onBack}
+            className="h-auto p-0 shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-zinc-200"
+          >
+            空间列表
+          </Button>
+          <ChevronRight className="size-3.5 shrink-0 text-zinc-300 dark:text-zinc-600" />
+          <Button variant="ghost"
+            type="button"
+            onClick={() => navigateToBreadcrumb(-1)}
+            className={`flex shrink-0 cursor-default items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-sm transition-colors ${breadcrumbs.length === 0 ? "font-semibold text-zinc-900 dark:text-foreground" : "font-medium text-zinc-500 hover:text-zinc-800 dark:text-muted-foreground dark:hover:text-zinc-200"}`}
+          >
+            <Database className="size-3.5 shrink-0 text-emerald-500" />
+            <span>{bucket}</span>
+          </Button>
+          {breadcrumbs.length > 0 && (() => {
+            const SHOW_TAIL = 4;
+            const collapsed = breadcrumbs.length > SHOW_TAIL + 1;
+            const visibleHead = collapsed ? [] : breadcrumbs.slice(0, -1);
+            const visibleTail = collapsed ? breadcrumbs.slice(-SHOW_TAIL) : [breadcrumbs[breadcrumbs.length - 1]];
+            const hiddenMiddle = collapsed ? breadcrumbs.slice(0, -SHOW_TAIL) : [];
+            return (
+              <>
+                {visibleHead.map((seg, i) => (
+                  <span key={i} className="flex shrink-0 items-center">
+                    <ChevronRight className="size-3.5 text-zinc-300 dark:text-zinc-600" />
+                    <Button variant="ghost" type="button" onClick={() => navigateToBreadcrumb(i)}
+                      className="h-auto p-0 whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-800 dark:text-muted-foreground dark:hover:text-zinc-200">
+                      {seg}
+                    </Button>
+                  </span>
+                ))}
+                {collapsed && (
+                  <span className="relative flex shrink-0 items-center">
+                    <ChevronRight className="size-3.5 text-zinc-300 dark:text-zinc-600" />
+                    <Popover open={breadcrumbMenuOpen} onOpenChange={setBreadcrumbMenuOpen}>
+                      <PopoverTrigger render={<Button type="button" variant="ghost" size="sm" aria-label="显示上级目录" />}>…</PopoverTrigger>
+                      <PopoverContent align="start" className="max-h-64 w-44 gap-0 overflow-y-auto p-1" aria-label="上级目录">
+                          {hiddenMiddle.map((seg, i) => (
+                            <Button variant="ghost" key={i} type="button"
+                              onClick={() => { navigateToBreadcrumb(i); setBreadcrumbMenuOpen(false); }}
+                              className="h-auto p-0 w-full truncate px-3 py-1.5 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-foreground dark:hover:bg-accent"
+                            >{seg}</Button>
+                          ))}
+                      </PopoverContent>
+                    </Popover>
+                  </span>
+                )}
+                {visibleTail.map((seg, relIdx) => {
+                  const i = collapsed ? breadcrumbs.length - SHOW_TAIL + relIdx : breadcrumbs.length - 1;
+                  const isLast = relIdx === visibleTail.length - 1;
+                  return (
+                    <span key={i} className="flex min-w-0 shrink-0 items-center">
+                      <ChevronRight className="size-3.5 shrink-0 text-zinc-300 dark:text-zinc-600" />
+                      <Button variant="ghost"
+                        type="button"
+                        onClick={() => navigateToBreadcrumb(i)}
+                        className={`max-w-[240px] truncate rounded-md px-2 py-1 text-sm transition-colors ${
+                          isLast
+                            ? "font-semibold text-zinc-900 dark:text-foreground"
+                            : "font-medium text-zinc-500 hover:text-zinc-800 dark:text-muted-foreground dark:hover:text-zinc-200"
+                        }`}
+                        title={seg}
+                      >{seg}</Button>
+                    </span>
+                  );
+                })}
+              </>
+            );
+          })()}
+        </div>
+
+        {/* ── Actions row ── */}
+        <div className="flex h-12 shrink-0 items-center gap-2 px-6">
           <div className="flex shrink-0 items-center gap-0.5">
             <Button
               variant="ghost"
@@ -724,7 +817,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
 
           {someSelected ? (
             <div className="flex shrink-0 items-center gap-2">
-              <span className="text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
+              <span className="text-xs tabular-nums text-zinc-400 dark:text-muted-foreground">
                 已选 {selectedKeys.size} 项
               </span>
               <Button variant="outline" onClick={handleBatchDownload}>
@@ -739,7 +832,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
             </div>
           ) : (
             <div className="flex shrink-0 items-center gap-2">
-              <div className="relative w-52">
+              <div className="relative w-40 @3xl/file-page:w-52">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   ref={searchInputRef}
@@ -757,15 +850,17 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                 />
                 <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
                   {committedSearch && (
-                    <span className="px-0.5 text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500" title={`${sortedEntries.length} 个结果`}>
-                      {sortedEntries.length}
-                    </span>
+                    <Tooltip content={`${sortedEntries.length} 个结果`}>
+                      <span className="px-0.5 text-[11px] tabular-nums text-zinc-400 dark:text-muted-foreground">
+                        {sortedEntries.length}
+                      </span>
+                    </Tooltip>
                   )}
                   {(searchInput || committedSearch) && (
                     <Button variant="ghost"
                       type="button"
                       onClick={() => clearSearch()}
-                      className="h-auto p-0 rounded-xs p-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                      className="h-auto p-0 rounded-xs p-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-accent dark:hover:text-zinc-200"
                       aria-label="清除查找"
                     >
                       <X className="size-3" />
@@ -786,7 +881,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                 <PopoverContent align="end" className="w-44 p-1">
                   <Button variant="ghost"
                     type="button"
-                    className="h-auto p-0 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-zinc-700 transition-colors hover:bg-accent dark:text-zinc-200"
+                    className="h-auto p-0 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-zinc-700 transition-colors hover:bg-accent dark:text-foreground"
                     onClick={() => { setUploadMenuOpen(false); handleUpload(false); }}
                   >
                     <Upload className="size-4 text-muted-foreground" />
@@ -794,7 +889,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                   </Button>
                   <Button variant="ghost"
                     type="button"
-                    className="h-auto p-0 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-zinc-700 transition-colors hover:bg-accent dark:text-zinc-200"
+                    className="h-auto p-0 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-zinc-700 transition-colors hover:bg-accent dark:text-foreground"
                     onClick={() => { setUploadMenuOpen(false); handleUpload(true); }}
                   >
                     <FolderOpen className="size-4 text-muted-foreground" />
@@ -802,92 +897,19 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                   </Button>
                 </PopoverContent>
               </Popover>
-              <Button variant="outline" onClick={() => { setShowCreateFolder(true); setNewFolderName(""); }} disabled={loading} title="新建文件夹">
+              <Button variant="outline" onClick={() => { setShowCreateFolder(true); setNewFolderName(""); }} disabled={loading} title="新建文件夹" aria-label="新建文件夹">
                 <FolderPlus />
-                新建文件夹
+                <span className="hidden @3xl/file-page:inline">新建文件夹</span>
               </Button>
             </div>
           )}
         </div>
 
-        {/* ── Path row ── */}
-        <div className="flex min-w-0 items-center gap-1 overflow-x-auto px-6 py-2">
-          <Button variant="ghost"
-            type="button"
-            onClick={onBack}
-            className="h-auto p-0 shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-          >
-            空间列表
-          </Button>
-          <ChevronRight className="size-3.5 shrink-0 text-zinc-300 dark:text-zinc-600" />
-          <Button variant="ghost"
-            type="button"
-            onClick={() => navigateToBreadcrumb(-1)}
-            className={`flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-sm transition-colors ${breadcrumbs.length === 0 ? "font-semibold text-zinc-900 dark:text-zinc-100" : "font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"}`}
-          >
-            <Database className="size-3.5 shrink-0 text-emerald-500" />
-            <span>{bucket}</span>
-          </Button>
-          {breadcrumbs.length > 0 && (() => {
-            const SHOW_TAIL = 4;
-            const collapsed = breadcrumbs.length > SHOW_TAIL + 1;
-            const visibleHead = collapsed ? [] : breadcrumbs.slice(0, -1);
-            const visibleTail = collapsed ? breadcrumbs.slice(-SHOW_TAIL) : [breadcrumbs[breadcrumbs.length - 1]];
-            const hiddenMiddle = collapsed ? breadcrumbs.slice(0, -SHOW_TAIL) : [];
-            return (
-              <>
-                {visibleHead.map((seg, i) => (
-                  <span key={i} className="flex shrink-0 items-center">
-                    <ChevronRight className="size-3.5 text-zinc-300 dark:text-zinc-600" />
-                    <Button variant="ghost" type="button" onClick={() => navigateToBreadcrumb(i)}
-                      className="h-auto p-0 whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200">
-                      {seg}
-                    </Button>
-                  </span>
-                ))}
-                {collapsed && (
-                  <span className="relative flex shrink-0 items-center">
-                    <ChevronRight className="size-3.5 text-zinc-300 dark:text-zinc-600" />
-                    <Popover open={breadcrumbMenuOpen} onOpenChange={setBreadcrumbMenuOpen}>
-                      <PopoverTrigger render={<Button type="button" variant="ghost" size="sm" aria-label="显示上级目录" />}>…</PopoverTrigger>
-                      <PopoverContent align="start" className="max-h-64 w-44 gap-0 overflow-y-auto p-1" aria-label="上级目录">
-                          {hiddenMiddle.map((seg, i) => (
-                            <Button variant="ghost" key={i} type="button"
-                              onClick={() => { navigateToBreadcrumb(i); setBreadcrumbMenuOpen(false); }}
-                              className="h-auto p-0 w-full truncate px-3 py-1.5 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                            >{seg}</Button>
-                          ))}
-                      </PopoverContent>
-                    </Popover>
-                  </span>
-                )}
-                {visibleTail.map((seg, relIdx) => {
-                  const i = collapsed ? breadcrumbs.length - SHOW_TAIL + relIdx : breadcrumbs.length - 1;
-                  const isLast = relIdx === visibleTail.length - 1;
-                  return (
-                    <span key={i} className="flex min-w-0 shrink-0 items-center">
-                      <ChevronRight className="size-3.5 shrink-0 text-zinc-300 dark:text-zinc-600" />
-                      <Button variant="ghost"
-                        type="button"
-                        onClick={() => navigateToBreadcrumb(i)}
-                        className={`max-w-[240px] truncate rounded-md px-2 py-1 text-sm transition-colors ${
-                          isLast
-                            ? "font-semibold text-zinc-900 dark:text-zinc-100"
-                            : "font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-                        }`}
-                        title={seg}
-                      >{seg}</Button>
-                    </span>
-                  );
-                })}
-              </>
-            );
-          })()}
-        </div>
       </div>
 
       {/* ── Content ── */}
-      <div className="relative min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="@container/file-list relative min-h-0 min-w-0 flex-1 overflow-hidden">
         {isDragOver && (
           <div className="pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 border-2 border-dashed border-emerald-400 bg-emerald-50/90 dark:border-emerald-500 dark:bg-emerald-950/80">
             <Upload className="size-12 text-emerald-500" />
@@ -896,38 +918,19 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
           </div>
         )}
         {loading ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 p-20 text-zinc-500 h-full">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-emerald-600 dark:border-zinc-800" />
-            <p className="text-sm">正在获取文件列表...</p>
-          </div>
+          <PageState loading title="正在获取文件列表..." />
         ) : error ? (
-          <div className="m-6 rounded-xl border border-red-200 bg-red-50 p-6 text-red-600 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
-            <div className="mb-2 flex items-center gap-2 font-medium">
-              <AlertCircle className="size-4" /> 加载失败
-            </div>
-            <div className="mb-4 break-all rounded-xs bg-red-100/50 p-2 font-mono text-xs dark:bg-red-900/20">{error}</div>
-            <Button variant="outline" size="sm" onClick={() => refreshCurrentView(true)}>重试</Button>
-          </div>
+          <PageState error title="加载失败" description={<span className="break-all">{error}</span>}>
+            <Button variant="secondary" size="sm" onClick={() => refreshCurrentView(true)}>重试</Button>
+          </PageState>
         ) : entries.length === 0 && !hasMore ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 p-16 text-center">
-            <Folder className="size-8 text-zinc-300 dark:text-zinc-600" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
-                {committedSearch
-                  ? "没有匹配此路径前缀的结果"
-                  : currentPrefix ? "该文件夹是空的" : "空间中没有文件"}
-              </p>
-              <p className="max-w-xs text-xs text-zinc-400 dark:text-zinc-500">
-                {committedSearch
-                  ? "输入 logo 可匹配当前目录下的 logo.png 或 logo-assets/。"
-                  : "上传文件后即可在此管理"}
-              </p>
-            </div>
-          </div>
+          <PageState icon={Folder}
+            title={committedSearch ? "没有匹配此路径前缀的结果" : currentPrefix ? "该文件夹是空的" : "空间中没有文件"}
+            description={committedSearch ? "输入 logo 可匹配当前目录下的 logo.png 或 logo-assets/。" : "上传文件后即可在此管理"} />
         ) : (
           <div ref={scrollContainerRef} className="h-full overflow-y-auto">
             <Table containerClassName="contents" className="w-full text-sm">
-              <TableHeader className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50/80 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-900/80">
+              <TableHeader className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50/80 backdrop-blur-md dark:border-border dark:bg-card/90">
                 <TableRow>
                   <TableHead className="h-10 w-10 whitespace-nowrap px-2 pl-4 text-left align-middle">
                     <Checkbox checked={allSelected} indeterminate={someSelected && !allSelected}
@@ -939,11 +942,11 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                   <TableHead className="w-28 p-0" aria-sort={sortField === "size" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>
                     <TableSortButton onClick={() => cycleSort("size")}>大小<SortIcon field="size" /></TableSortButton>
                   </TableHead>
-                  <TableHead className="hidden h-10 w-52 whitespace-nowrap px-2 text-left align-middle text-xs font-medium text-zinc-500 md:table-cell dark:text-zinc-400">类型</TableHead>
-                  <TableHead className="hidden w-44 p-0 lg:table-cell" aria-sort={sortField === "time" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>
+                  <TableHead className="hidden h-10 w-52 whitespace-nowrap px-2 text-left align-middle text-xs font-medium text-zinc-500 @3xl/file-list:table-cell dark:text-muted-foreground">类型</TableHead>
+                  <TableHead className="hidden w-44 p-0 @4xl/file-list:table-cell" aria-sort={sortField === "time" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>
                     <TableSortButton onClick={() => cycleSort("time")}>修改时间<SortIcon field="time" /></TableSortButton>
                   </TableHead>
-                  <TableHead className="h-10 w-36 whitespace-nowrap px-2 pr-5 text-right text-xs font-medium text-zinc-500 dark:text-zinc-400" />
+                  <TableHead className="h-10 w-36 whitespace-nowrap px-2 pr-5 text-right text-xs font-medium text-zinc-500 dark:text-muted-foreground" />
                 </TableRow>
               </TableHeader>
             </Table>
@@ -965,7 +968,7 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                     <div
                       key={`d:${entry.prefix}`}
                       style={rowStyle}
-                      className={`group flex cursor-pointer items-center border-b border-zinc-100 text-sm transition-colors hover:bg-zinc-50 dark:border-zinc-800/80 dark:hover:bg-zinc-900/50 ${dirToDelete === entry.prefix && isDeleting ? "pointer-events-none opacity-40" : ""}`}
+                      className={`group flex cursor-default items-center border-b border-zinc-100 text-sm transition-colors hover:bg-zinc-50 dark:border-border/80 dark:hover:bg-muted/60 ${dirToDelete === entry.prefix && isDeleting ? "pointer-events-none opacity-40" : ""}`}
                       onClick={() => navigateToFolder(entry.prefix)}
                     >
                       <div className="w-10 shrink-0 pl-4" />
@@ -973,12 +976,12 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                         <Folder className="size-4 shrink-0 text-amber-400" />
                         <button type="button" disabled={dirToDelete === entry.prefix && isDeleting}
                           onClick={e => { e.stopPropagation(); navigateToFolder(entry.prefix); }}
-                          className="w-full min-w-0 cursor-pointer truncate text-left font-medium text-zinc-800 transition-colors group-hover:text-emerald-600 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring dark:text-zinc-100 dark:group-hover:text-emerald-400">
+                          className="w-full min-w-0 cursor-default truncate text-left font-medium text-zinc-800 transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring dark:text-foreground">
                           <HighlightText text={entry.name} query={committedSearch} />
                         </button>
                       </div>
                       <div className="w-28 shrink-0 text-xs text-zinc-400">—</div>
-                      <div className="hidden w-52 shrink-0 text-xs text-zinc-500 md:block dark:text-zinc-400">文件夹</div>
+                      <div className="hidden w-52 shrink-0 text-xs text-zinc-500 md:block dark:text-muted-foreground">文件夹</div>
                       <div className="hidden w-44 shrink-0 text-xs text-zinc-400 lg:block">—</div>
                       <div className="w-36 shrink-0 pr-5">
                         <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
@@ -1001,11 +1004,11 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                   <div
                     key={`f:${file.key}`}
                     style={rowStyle}
-                    onClick={() => !someSelected && !isRenaming && setSelectedFile(file)}
+                    onClick={() => !someSelected && !isRenaming && setSelectedFileKey(file.key)}
                     onDoubleClick={() => !isRenaming && openPreview(file)}
                     onContextMenu={(e) => openCtxMenu(e, file)}
-                    className={`group flex cursor-pointer items-center border-b border-zinc-100 text-sm transition-colors dark:border-zinc-800/80
-                      ${isChecked ? "bg-emerald-50/60 hover:bg-emerald-50 dark:bg-emerald-900/10 dark:hover:bg-emerald-900/20" : "hover:bg-zinc-50 dark:hover:bg-zinc-900/50"}
+                    className={`group flex cursor-default items-center border-b border-zinc-100 text-sm transition-colors dark:border-border/80
+                      ${isChecked || selectedFile?.key === file.key ? "bg-accent/70 hover:bg-accent" : "hover:bg-zinc-50 dark:hover:bg-muted/60"}
                       ${fileToDelete === file.key && isDeleting ? "pointer-events-none opacity-40" : ""}`}
                   >
                     <div className="w-10 shrink-0 pl-4" onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
@@ -1020,31 +1023,33 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                           onBlur={() => commitRename(file.key)}
                           onKeyDown={e => { if (e.key === "Enter") commitRename(file.key); if (e.key === "Escape") setRenamingKey(null); }}
                           onClick={e => e.stopPropagation()}
-                          className="file-name-input min-w-0 w-full flex-1 rounded-xs border border-emerald-400 bg-white px-2 py-0.5 text-sm text-zinc-800 outline-none focus:ring-2 focus:ring-emerald-400/40 dark:border-emerald-600 dark:bg-zinc-800 dark:text-zinc-100"
+                          className="file-name-input min-w-0 w-full flex-1 rounded-xs border border-input bg-white px-2 py-0.5 text-sm text-zinc-800 outline-none dark:bg-muted dark:text-foreground"
                         />
                       ) : (
                         <>
-                          <button type="button" disabled={someSelected || (fileToDelete === file.key && isDeleting)}
-                            onClick={e => { e.stopPropagation(); setSelectedFile(file); }}
-                            className="min-w-0 cursor-pointer truncate text-left text-zinc-800 transition-colors group-hover:text-emerald-600 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring dark:text-zinc-100 dark:group-hover:text-emerald-400" title={file.key}>
-                            <HighlightText text={entry.name} query={committedSearch} />
-                          </button>
+                          <Tooltip content={file.key}>
+                            <button type="button" data-file-detail-trigger disabled={someSelected || (fileToDelete === file.key && isDeleting)}
+                              onClick={e => { e.stopPropagation(); setSelectedFileKey(file.key); }}
+                              className="min-w-0 cursor-default truncate text-left text-zinc-800 transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring dark:text-foreground">
+                              <HighlightText text={entry.name} query={committedSearch} />
+                            </button>
+                          </Tooltip>
                           <Button variant="ghost"
                             type="button"
                             onClick={(e) => { void handleCopyFileName(e, file.key); }}
                             onDoubleClick={(e) => e.stopPropagation()}
                             title="复制文件名"
                             aria-label={`复制文件名：${file.key.slice(file.key.lastIndexOf("/") + 1)}`}
-                            className="h-auto p-0 shrink-0 rounded-xs p-1 text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-600 group-hover:opacity-100 group-focus-within:opacity-100 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                            className="h-auto p-0 shrink-0 rounded-xs p-1 text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-600 group-hover:opacity-100 group-focus-within:opacity-100 dark:hover:bg-accent dark:hover:text-zinc-200"
                           >
                             <Copy className="size-3.5" />
                           </Button>
                         </>
                       )}
                     </div>
-                    <div className="w-28 shrink-0 font-mono text-xs tabular-nums text-zinc-500 dark:text-zinc-400">{formatBytes(file.fsize)}</div>
-                    <div className="hidden w-52 shrink-0 truncate text-xs text-zinc-500 md:block dark:text-zinc-400">{file.mimeType || "—"}</div>
-                    <div className="hidden w-44 shrink-0 font-mono text-xs tabular-nums text-zinc-500 lg:block dark:text-zinc-400">{formatQiniuTime(file.putTime)}</div>
+                    <div className="w-28 shrink-0 font-mono text-xs tabular-nums text-zinc-500 dark:text-muted-foreground">{formatBytes(file.fsize)}</div>
+                    <div className="hidden w-52 shrink-0 truncate text-xs text-zinc-500 @3xl/file-list:block dark:text-muted-foreground">{file.mimeType || "—"}</div>
+                    <div className="hidden w-44 shrink-0 font-mono text-xs tabular-nums text-zinc-500 @4xl/file-list:block dark:text-muted-foreground">{formatQiniuTime(file.putTime)}</div>
                     <div className="w-36 shrink-0 pr-5">
                       <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                         <Button type="button" variant="ghost" size="icon-xs" title="重命名" aria-label="重命名" className="text-zinc-400" onClick={(e) => startRename(e, file)}>
@@ -1097,36 +1102,36 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
             aria-label="文件操作"
           >
             <Button variant="ghost"
-              onClick={() => { setSelectedFile(ctxMenu.file); closeCtxMenu(); }}
-              className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              onClick={() => { setSelectedFileKey(ctxMenu.file.key); closeCtxMenu(); }}
+              className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-foreground hover:bg-zinc-100 dark:hover:bg-accent transition-colors"
             >
               <File className="w-4 h-4 text-zinc-400" />文件详情
             </Button>
             <Button variant="ghost"
               onClick={(e) => { startRename(e, ctxMenu.file); closeCtxMenu(); }}
-              className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-foreground hover:bg-zinc-100 dark:hover:bg-accent transition-colors"
             >
               <Pencil className="w-4 h-4 text-zinc-400" />重命名
             </Button>
             <Button variant="ghost"
               onClick={(e) => { void handleCopyFileName(e, ctxMenu.file.key); closeCtxMenu(); }}
-              className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-foreground hover:bg-zinc-100 dark:hover:bg-accent transition-colors"
             >
               <Copy className="w-4 h-4 text-zinc-400" />复制文件名
             </Button>
             <Button variant="ghost"
               onClick={(e) => { handleCopyLink(e, ctxMenu.file.key); closeCtxMenu(); }}
-              className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-foreground hover:bg-zinc-100 dark:hover:bg-accent transition-colors"
             >
               <Link2 className="w-4 h-4 text-zinc-400" />复制链接
             </Button>
             <Button variant="ghost"
               onClick={() => { handleDownload(ctxMenu.file.key); closeCtxMenu(); }}
-              className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 dark:text-foreground hover:bg-zinc-100 dark:hover:bg-accent transition-colors"
             >
               <Download className="w-4 h-4 text-zinc-400" />下载
             </Button>
-            <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
+            <div className="my-1 border-t border-zinc-100 dark:border-border" />
             <Button variant="ghost"
               onClick={() => { setFileToDelete(ctxMenu.file.key); closeCtxMenu(); }}
               className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
@@ -1137,31 +1142,32 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
         </Popover>
       )}
 
-      {/* ── File Detail Drawer ── */}
-      <Sheet modal={false} disablePointerDismissal open={Boolean(selectedFile)}
-        onOpenChange={(open) => { if (!open) setSelectedFile(null); }}>
-        <SheetContent className="gap-0" showCloseButton={false} showOverlay={false}>
-        {selectedFile && (
-          <>
+      {/* ── File Detail Pane ── */}
+      {selectedFile && (
+          <aside aria-label="文件详情" className="flex min-h-0 w-80 shrink-0 flex-col border-l border-border bg-background text-foreground">
             {/* Header */}
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-zinc-100 dark:border-border shrink-0">
               <div className="shrink-0">{getFileIcon(selectedFile.mimeType)}</div>
-              <SheetTitle className="flex-1 truncate text-sm font-semibold" title={selectedFile.key}>
-                {selectedFile.key.split('/').pop() || selectedFile.key}
-              </SheetTitle>
+              <Tooltip content={selectedFile.key}>
+                <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">
+                  {selectedFile.key.split('/').pop() || selectedFile.key}
+                </h2>
+              </Tooltip>
               <Button variant="ghost"
-                onClick={() => setSelectedFile(null)}
-                className="h-auto p-0 p-1 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                onClick={() => setSelectedFileKey(null)}
+                title="关闭文件详情"
+                aria-label="关闭文件详情"
+                className="h-auto p-0 p-1 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-accent transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </Button>
             </div>
 
             {/* Body */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 text-sm">
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-4 text-sm">
               {selectedFile.mimeType?.startsWith('image/') && domains.length > 0 && (
                 <div
-                  className="rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center cursor-zoom-in relative group"
+                  className="rounded-xl overflow-hidden bg-zinc-100 dark:bg-muted flex items-center justify-center cursor-default relative group"
                   style={{ minHeight: 140 }}
                   onClick={() => openPreview(selectedFile)}
                 >
@@ -1176,54 +1182,57 @@ export function FileManager({ ak, sk, bucket, onBack, refreshTrigger, initialPre
                   </div>
                 </div>
               )}
-              {([
-                ["完整路径", selectedFile.key],
-                ["文件大小", formatBytes(selectedFile.fsize)],
-                ["MIME 类型", selectedFile.mimeType || "unknown"],
-                ["上传时间", formatQiniuTime(selectedFile.putTime)],
-                ["存储类型", (["标准存储", "低频存储", "归档存储", "深度归档"][selectedFile.type] ?? `类型 ${selectedFile.type}`)],
-                ["Hash (Etag)", selectedFile.hash],
-              ] as [string, string][]).map(([label, value]) => (
-                <div key={label}>
-                  <p className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wide mb-1">{label}</p>
-                  <p className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all bg-zinc-50 dark:bg-zinc-800/60 rounded-lg px-3 py-2">{value}</p>
-                </div>
-              ))}
+              <dl className="divide-y divide-border/60">
+                {([
+                  ["完整路径", selectedFile.key],
+                  ["文件大小", formatBytes(selectedFile.fsize)],
+                  ["MIME 类型", selectedFile.mimeType || "unknown"],
+                  ["上传时间", formatQiniuTime(selectedFile.putTime)],
+                  ["存储类型", (["标准存储", "低频存储", "归档存储", "深度归档"][selectedFile.type] ?? `类型 ${selectedFile.type}`)],
+                  ["Hash (Etag)", selectedFile.hash],
+                ] as [string, string][]).map(([label, value]) => (
+                  <div key={label} className="grid grid-cols-[5rem_minmax(0,1fr)] gap-3 py-3 first:pt-0 last:pb-0">
+                    <dt className="text-xs text-muted-foreground">{label}</dt>
+                    <dd className="min-w-0 break-all font-mono text-xs text-foreground">{value}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
 
             {/* Footer */}
-            <div className="px-4 py-4 border-t border-zinc-100 dark:border-zinc-800 flex flex-col gap-2 shrink-0">
-              <Button variant="ghost"
-                onClick={(e) => { void handleCopyFileName(e, selectedFile.key); }}
-                className="h-auto p-0 justify-start w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-              >
-                <Copy className="w-4 h-4" />复制文件名
-              </Button>
-              <Button variant="ghost"
-                onClick={(e) => { handleCopyLink(e, selectedFile.key); }}
-                className="h-auto p-0 justify-start w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
-              >
-                {copiedKey === selectedFile.key
-                  ? <><Check className="w-4 h-4" />已复制链接</>
-                  : <><Link2 className="w-4 h-4" />复制访问链接</>}
-              </Button>
-              <Button variant="ghost"
-                onClick={() => handleDownload(selectedFile.key)}
-                className="h-auto p-0 justify-start w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
-              >
-                <Download className="w-4 h-4" />下载文件
-              </Button>
-              <Button variant="ghost"
-                onClick={() => { setFileToDelete(selectedFile.key); setSelectedFile(null); }}
-                className="h-auto p-0 justify-start w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
-              >
-                <Trash2 className="w-4 h-4" />删除文件
-              </Button>
+            <div className="shrink-0 px-4 pb-4">
+              <div className="divide-y divide-border overflow-hidden rounded-xl bg-muted/50">
+                <Button variant="ghost"
+                  onClick={(e) => { void handleCopyFileName(e, selectedFile.key); }}
+                  className="h-auto w-full justify-start rounded-none border-0 px-3 py-2.5 text-foreground"
+                >
+                  <Copy className="w-4 h-4" />复制文件名
+                </Button>
+                <Button variant="ghost"
+                  onClick={(e) => { handleCopyLink(e, selectedFile.key); }}
+                  className="h-auto w-full justify-start rounded-none border-0 px-3 py-2.5 text-foreground"
+                >
+                  {copiedKey === selectedFile.key
+                    ? <><Check className="w-4 h-4 text-emerald-500" />已复制链接</>
+                    : <><Link2 className="w-4 h-4" />复制访问链接</>}
+                </Button>
+                <Button variant="ghost"
+                  onClick={() => handleDownload(selectedFile.key)}
+                  className="h-auto w-full justify-start rounded-none border-0 px-3 py-2.5 text-foreground"
+                >
+                  <Download className="w-4 h-4" />下载文件
+                </Button>
+                <Button variant="ghost"
+                  onClick={() => { setFileToDelete(selectedFile.key); setSelectedFileKey(null); }}
+                  className="h-auto w-full justify-start rounded-none border-0 px-3 py-2.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                >
+                  <Trash2 className="w-4 h-4" />删除文件
+                </Button>
+              </div>
             </div>
-          </>
-        )}
-        </SheetContent>
-      </Sheet>
+          </aside>
+      )}
+      </div>
 
       {/* ── Image Preview Modal ── */}
       {previewFile && domains.length > 0 && (

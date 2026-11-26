@@ -31,7 +31,7 @@ export function ThemeSwitcher() {
           setOpen(false);
         }
       }}>
-        {themes.map(({ value, label, icon: ThemeIcon }) => <Label key={value} htmlFor={`${id}-${value}`} className={`cursor-pointer gap-2 rounded-md px-2 py-2 hover:bg-accent ${theme === value ? "bg-accent" : ""}`}>
+        {themes.map(({ value, label, icon: ThemeIcon }) => <Label key={value} htmlFor={`${id}-${value}`} className={`cursor-default gap-2 rounded-md px-2 py-2 hover:bg-accent ${theme === value ? "bg-accent" : ""}`}>
           <ThemeIcon className="size-4 text-muted-foreground" />
           <span className="flex-1 text-xs font-normal">{label}</span>
           <RadioGroupItem id={`${id}-${value}`} value={value} />

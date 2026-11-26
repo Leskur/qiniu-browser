@@ -146,7 +146,7 @@ export function BucketList({
   return (
     <div className="flex-1 flex flex-col min-h-0 relative h-full">
       {!loading && !error && (
-        <div className="flex h-12 items-center gap-2 px-6 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
+        <div className="flex h-12 items-center gap-2 px-6 border-b border-zinc-200 dark:border-border shrink-0">
           <Button onClick={() => setShowCreateDialog(true)}>
             <Plus /> 新建空间
           </Button>
@@ -161,7 +161,7 @@ export function BucketList({
           </Button>
 
           {stats.totalBuckets > 0 && (
-            <p className="hidden min-w-0 truncate text-xs text-zinc-400 dark:text-zinc-500 sm:block">
+            <p className="hidden min-w-0 truncate text-xs text-zinc-400 dark:text-muted-foreground sm:block">
               {stats.totalBuckets} 空间
               <span className="mx-1.5 text-zinc-300 dark:text-zinc-700">·</span>
               {stats.totalFiles.toLocaleString()} 文件

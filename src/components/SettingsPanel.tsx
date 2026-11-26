@@ -30,14 +30,14 @@ const CACHE_EXPIRE_ITEMS = [
 ];
 
 const rowClass =
-  "flex min-h-11 w-full items-center gap-3 rounded-none border-b border-zinc-200/70 px-3.5 py-2.5 text-left last:border-b-0 dark:border-zinc-800";
-const rowFocusClass = "focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
+  "flex min-h-11 w-full items-center gap-3 rounded-none border-0 px-3.5 py-2.5 text-left";
+const rowFocusClass = "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
 function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="space-y-2">
-      <h3 className="px-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">{title}</h3>
-      <div className="overflow-hidden rounded-xl bg-zinc-50 ring-1 ring-zinc-200/80 dark:bg-zinc-900/80 dark:ring-zinc-800">
+      <h3 className="px-1 text-xs font-medium text-zinc-500 dark:text-muted-foreground">{title}</h3>
+      <div className="divide-y divide-border overflow-hidden rounded-xl bg-zinc-50 dark:bg-card">
         {children}
       </div>
     </section>
@@ -65,16 +65,15 @@ function SettingsSelectRow({
         aria-label={ariaLabel}
         className={cn(
           rowClass,
-          rowFocusClass,
-          "h-auto border-0 border-b bg-transparent px-3.5 shadow-none",
-          "hover:bg-zinc-100/80 dark:bg-transparent dark:hover:bg-zinc-800/50",
+          "h-auto border-0 bg-transparent px-3.5 shadow-none",
+          "hover:bg-zinc-100/80 dark:bg-transparent dark:hover:bg-accent/50",
           "data-[size=default]:h-auto",
           "justify-between gap-3",
         )}
       >
-        <Icon className="size-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
-        <span className="min-w-0 flex-1 text-left text-sm font-normal text-zinc-800 dark:text-zinc-100">{label}</span>
-        <SelectValue className="max-w-fit flex-none grow-0 shrink-0 text-sm text-zinc-500 dark:text-zinc-400" />
+        <Icon className="size-4 shrink-0 text-zinc-400 dark:text-muted-foreground" />
+        <span className="min-w-0 flex-1 text-left text-sm font-normal text-zinc-800 dark:text-foreground">{label}</span>
+        <SelectValue className="max-w-fit flex-none grow-0 shrink-0 text-sm text-zinc-500 dark:text-muted-foreground" />
       </SelectTrigger>
       <SelectContent align="end" alignItemWithTrigger={false} className="!w-auto min-w-28">
         {items.map(item => (
@@ -105,12 +104,12 @@ function SettingsActionRow({
       className={cn(
         rowClass,
         rowFocusClass,
-        "h-auto justify-start text-left cursor-pointer transition-colors hover:bg-zinc-100/80 dark:hover:bg-zinc-800/50",
+        "h-auto justify-start text-left cursor-default transition-colors hover:bg-zinc-100/80 dark:hover:bg-accent/50",
       )}
     >
-      <Icon className="size-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
-      <span className="min-w-0 flex-1 text-sm text-zinc-800 dark:text-zinc-100">{label}</span>
-      <span className="shrink-0 text-sm text-zinc-500 dark:text-zinc-400">{value}</span>
+      <Icon className="size-4 shrink-0 text-zinc-400 dark:text-muted-foreground" />
+      <span className="min-w-0 flex-1 text-sm text-zinc-800 dark:text-foreground">{label}</span>
+      <span className="shrink-0 text-sm text-zinc-500 dark:text-muted-foreground">{value}</span>
       <TrailingIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
     </Button>
   );
@@ -201,9 +200,9 @@ export function SettingsPanel({ appVersion }: { appVersion: string }) {
               }}
             />
             <div className={rowClass}>
-              <Info className="size-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
-              <span className="min-w-0 flex-1 text-sm text-zinc-800 dark:text-zinc-100">应用版本</span>
-              <span className="shrink-0 text-sm text-zinc-500 dark:text-zinc-400">
+              <Info className="size-4 shrink-0 text-zinc-400 dark:text-muted-foreground" />
+              <span className="min-w-0 flex-1 text-sm text-zinc-800 dark:text-foreground">应用版本</span>
+              <span className="shrink-0 text-sm text-zinc-500 dark:text-muted-foreground">
                 {appVersion === "未知" ? appVersion : `v${appVersion}`}
               </span>
               <span aria-hidden="true" className="size-4 shrink-0" />
