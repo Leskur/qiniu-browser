@@ -6,6 +6,7 @@ import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Tooltip } from "../components/ui/tooltip";
 import { PageState } from "../components/PageState";
+import { PageToolbar } from "../components/PageToolbar";
 import { Label } from "../components/ui/label";
 import {
   Dialog,
@@ -54,39 +55,40 @@ export function BookmarkPage({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-200 px-6 dark:border-border">
+      <PageToolbar>
         <span className="text-xs tabular-nums text-zinc-400 dark:text-muted-foreground">
           {searchQuery ? `${filtered.length} / ${bookmarks.length} 个书签` : `${bookmarks.length} 个书签`}
         </span>
         <div className="flex-1" />
-        <div className="relative w-48">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <div className="relative w-56 shrink-0">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜索书签..."
             aria-label="搜索书签"
-            className="pl-8 pr-8"
+            className="pl-8 pr-9"
           />
           {searchQuery && (
             <Button variant="ghost"
+              size="icon-sm"
               type="button"
               onClick={() => setSearchQuery("")}
-              className="h-auto p-0 absolute right-2 top-1/2 -translate-y-1/2 rounded-xs p-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-accent dark:hover:text-zinc-200"
+              className="absolute right-0.5 top-1/2 -translate-y-1/2 text-muted-foreground active:not-aria-[haspopup]:-translate-y-1/2"
               aria-label="清除搜索"
             >
               <X className="size-3" />
             </Button>
           )}
         </div>
-      </div>
+      </PageToolbar>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
           <PageState icon={Search} title="没有匹配的书签" />
         ) : (
-          <div className="divide-y divide-zinc-100 dark:divide-border/80">
+          <div className="divide-y divide-border/40 dark:divide-border/80">
             {filtered.map((bm) => {
               const path = `${bm.bucket}${bm.prefix ? "/" + bm.prefix.replace(/\/$/, "") : ""}`;
               return (

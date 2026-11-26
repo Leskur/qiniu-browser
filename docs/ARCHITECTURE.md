@@ -6,6 +6,7 @@
 | --- | --- |
 | `src/App.tsx` | 应用布局、登录会话、页面切换和更新入口 |
 | `src/components/WindowTitlebar.tsx` | Windows 自绘窗口控制；macOS 在原生红黄绿按钮旁显示侧栏折叠入口，Linux 保留系统标题栏 |
+| `src/components/PageToolbar.tsx` | 统一列表页工具栏的固定高度、留白、控件间距和按钮圆角 |
 | `src/pages/FileManager.tsx` | 文件管理界面、导航、排序、选择、对话框及编辑操作的交互协调 |
 | `src/pages/file-manager/useDirectoryListing.ts` | 目录请求、搜索、分页、缓存、旧请求隔离，以及操作完成后的列表更新 |
 | `src/pages/file-manager/useBucketDomains.ts` | 当前账号和空间的域名加载与共享缓存协调 |

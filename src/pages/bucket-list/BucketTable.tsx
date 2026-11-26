@@ -94,8 +94,8 @@ export function BucketTable({
 
   return (
     <ScrollArea className="relative min-h-0 flex-1 bg-white dark:bg-background">
-      <Table className="w-full whitespace-nowrap text-left text-sm">
-        <TableHeader className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50/80 backdrop-blur-md dark:border-border dark:bg-card/90">
+      <Table containerClassName="contents" className="w-full whitespace-nowrap text-left text-sm">
+        <TableHeader className="sticky top-0 z-10 border-b border-border bg-zinc-50 dark:bg-card">
           <TableRow>
             {sortableColumns.map(({ field, label }) => (
               <TableHead key={field} className={field === "region" ? "min-w-[100px] p-0" : "p-0"}
@@ -108,7 +108,7 @@ export function BucketTable({
             <TableHead className="w-12 px-6 py-3" />
           </TableRow>
         </TableHeader>
-        <TableBody className="divide-y divide-zinc-100 dark:divide-border/80">
+        <TableBody className="divide-y divide-border/40 dark:divide-border/80">
           {buckets.map(bucket => (
             <TableRow
               key={bucket.tbl}

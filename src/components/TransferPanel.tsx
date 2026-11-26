@@ -73,7 +73,7 @@ const TaskItemView = memo(function TaskItemView({
     : 0;
 
   return (
-    <div className="group px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-accent/50 border-b border-zinc-100 dark:border-border">
+    <div className="group px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-accent/50 border-b border-border/40 dark:border-border">
       <div className="flex items-start gap-2.5">
         <div className="p-1.5 rounded-lg shrink-0 bg-muted text-muted-foreground">
           <Icon className="w-3.5 h-3.5" />

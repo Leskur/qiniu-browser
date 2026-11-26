@@ -66,7 +66,7 @@
     --accent: #ececec;
     --accent-foreground: #0d0d0d;
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
+    --border: oklch(0.922 0 0 / 60%);
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
     --chart-1: oklch(0.87 0 0);
@@ -81,7 +81,7 @@
     --sidebar-primary-foreground: #ffffff;
     --sidebar-accent: #eaeaea;
     --sidebar-accent-foreground: #0d0d0d;
-    --sidebar-border: #e5e5e5;
+    --sidebar-border: var(--border);
     --sidebar-ring: #8f8f8f;
 }
 
@@ -109,7 +109,7 @@
     --accent: #3a3a3a;
     --accent-foreground: #ececec;
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
+    --border: oklch(1 0 0 / 6%);
     --input: oklch(1 0 0 / 15%);
     --ring: #8f8f8f;
     --chart-1: oklch(0.87 0 0);
@@ -123,7 +123,7 @@
     --sidebar-primary-foreground: #2b2b2b;
     --sidebar-accent: #3a3a3a;
     --sidebar-accent-foreground: #ececec;
-    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-border: var(--border);
     --sidebar-ring: #8f8f8f;
 }
 

@@ -20,6 +20,7 @@ import { formatBytes, formatQiniuTime } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { Tooltip } from "../components/ui/tooltip";
 import { PageState } from "../components/PageState";
+import { PageToolbar } from "../components/PageToolbar";
 import { Input } from "../components/ui/input";
 import { Switch } from "../components/ui/switch";
 import { Checkbox } from "../components/ui/checkbox";
@@ -689,7 +690,7 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
 
 
       {/* ── Top Bar ── */}
-      <div className="relative z-20 shrink-0 border-b border-zinc-200 dark:border-border">
+      <div className="relative z-20 shrink-0 border-b border-border dark:border-border">
         {/* ── Path row ── */}
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto px-6 py-2">
           <Button variant="ghost"
@@ -766,8 +767,8 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
         </div>
 
         {/* ── Actions row ── */}
-        <div className="flex h-12 shrink-0 items-center gap-2 px-6">
-          <div className="flex shrink-0 items-center gap-0.5">
+        <PageToolbar bordered={false}>
+          <div className="flex shrink-0 items-center gap-2">
             <Button
               variant="ghost"
               size="icon-sm"
@@ -826,14 +827,14 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
               <Button variant="destructive" onClick={() => setBatchDeletePending(true)}>
                 <Trash2 />批量删除
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => setSelectedKeys(new Set())} title="取消选择" aria-label="取消选择">
+              <Button variant="ghost" size="icon-sm" onClick={() => setSelectedKeys(new Set())} title="取消选择" aria-label="取消选择">
                 <X />
               </Button>
             </div>
           ) : (
             <div className="flex shrink-0 items-center gap-2">
-              <div className="relative w-40 @3xl/file-page:w-52">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <div className="relative w-56 shrink-0">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   ref={searchInputRef}
                   type="text"
@@ -842,13 +843,13 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
                   placeholder="按路径前缀查找，如 logo"
                   aria-label="按路径前缀查找"
                   title="在当前目录输入 logo，可匹配 logo.png 或 logo-assets/，区分大小写"
-                  className={`pl-8 ${searchInput || committedSearch ? "pr-14" : "pr-2.5"}`}
+                  className={`pl-8 ${committedSearch ? "pr-20" : searchInput ? "pr-10" : "pr-2.5"}`}
                   onKeyDown={e => {
                     if (e.key === "Escape") { clearSearch(); (e.target as HTMLInputElement).blur(); }
                     if (e.key === "Enter") { e.preventDefault(); void runPrefixSearch(searchInput); }
                   }}
                 />
-                <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+                <div className="absolute right-0.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
                   {committedSearch && (
                     <Tooltip content={`${sortedEntries.length} 个结果`}>
                       <span className="px-0.5 text-[11px] tabular-nums text-zinc-400 dark:text-muted-foreground">
@@ -858,9 +859,10 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
                   )}
                   {(searchInput || committedSearch) && (
                     <Button variant="ghost"
+                      size="icon-sm"
                       type="button"
                       onClick={() => clearSearch()}
-                      className="h-auto p-0 rounded-xs p-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-accent dark:hover:text-zinc-200"
+                      className="text-muted-foreground"
                       aria-label="清除查找"
                     >
                       <X className="size-3" />
@@ -903,7 +905,7 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
               </Button>
             </div>
           )}
-        </div>
+        </PageToolbar>
 
       </div>
 
@@ -929,8 +931,8 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
             description={committedSearch ? "输入 logo 可匹配当前目录下的 logo.png 或 logo-assets/。" : "上传文件后即可在此管理"} />
         ) : (
           <div ref={scrollContainerRef} className="h-full overflow-y-auto">
-            <Table containerClassName="contents" className="w-full text-sm">
-              <TableHeader className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50/80 backdrop-blur-md dark:border-border dark:bg-card/90">
+            <Table containerClassName="sticky top-0 z-10 overflow-visible" className="w-full text-sm">
+              <TableHeader className="border-b border-border bg-zinc-50 dark:bg-card">
                 <TableRow>
                   <TableHead className="h-10 w-10 whitespace-nowrap px-2 pl-4 text-left align-middle">
                     <Checkbox checked={allSelected} indeterminate={someSelected && !allSelected}
@@ -968,7 +970,7 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
                     <div
                       key={`d:${entry.prefix}`}
                       style={rowStyle}
-                      className={`group flex cursor-default items-center border-b border-zinc-100 text-sm transition-colors hover:bg-zinc-50 dark:border-border/80 dark:hover:bg-muted/60 ${dirToDelete === entry.prefix && isDeleting ? "pointer-events-none opacity-40" : ""}`}
+                      className={`group flex cursor-default items-center border-b border-border/40 text-sm transition-colors hover:bg-zinc-50 dark:border-border/80 dark:hover:bg-muted/60 ${dirToDelete === entry.prefix && isDeleting ? "pointer-events-none opacity-40" : ""}`}
                       onClick={() => navigateToFolder(entry.prefix)}
                     >
                       <div className="w-10 shrink-0 pl-4" />
@@ -981,8 +983,8 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
                         </button>
                       </div>
                       <div className="w-28 shrink-0 text-xs text-zinc-400">—</div>
-                      <div className="hidden w-52 shrink-0 text-xs text-zinc-500 md:block dark:text-muted-foreground">文件夹</div>
-                      <div className="hidden w-44 shrink-0 text-xs text-zinc-400 lg:block">—</div>
+                      <div className="hidden w-52 shrink-0 text-xs text-zinc-500 @3xl/file-list:block dark:text-muted-foreground">文件夹</div>
+                      <div className="hidden w-44 shrink-0 text-xs text-zinc-400 @4xl/file-list:block">—</div>
                       <div className="w-36 shrink-0 pr-5">
                         <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                           <Button type="button" variant="ghost" size="icon-xs" title="下载整个文件夹" aria-label="下载整个文件夹" className="text-zinc-400" onClick={(e) => { e.stopPropagation(); handleDownloadFolder(entry.prefix); }}>
@@ -1007,7 +1009,7 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
                     onClick={() => !someSelected && !isRenaming && setSelectedFileKey(file.key)}
                     onDoubleClick={() => !isRenaming && openPreview(file)}
                     onContextMenu={(e) => openCtxMenu(e, file)}
-                    className={`group flex cursor-default items-center border-b border-zinc-100 text-sm transition-colors dark:border-border/80
+                    className={`group flex cursor-default items-center border-b border-border/40 text-sm transition-colors dark:border-border/80
                       ${isChecked || selectedFile?.key === file.key ? "bg-accent/70 hover:bg-accent" : "hover:bg-zinc-50 dark:hover:bg-muted/60"}
                       ${fileToDelete === file.key && isDeleting ? "pointer-events-none opacity-40" : ""}`}
                   >
@@ -1023,7 +1025,7 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
                           onBlur={() => commitRename(file.key)}
                           onKeyDown={e => { if (e.key === "Enter") commitRename(file.key); if (e.key === "Escape") setRenamingKey(null); }}
                           onClick={e => e.stopPropagation()}
-                          className="file-name-input min-w-0 w-full flex-1 rounded-xs border border-input bg-white px-2 py-0.5 text-sm text-zinc-800 outline-none dark:bg-muted dark:text-foreground"
+                          className="file-name-input min-w-0 w-full flex-1 rounded-xs border border-input/60 bg-white px-2 py-0.5 text-sm text-zinc-800 outline-none dark:bg-muted dark:text-foreground"
                         />
                       ) : (
                         <>
@@ -1131,7 +1133,7 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
             >
               <Download className="w-4 h-4 text-zinc-400" />下载
             </Button>
-            <div className="my-1 border-t border-zinc-100 dark:border-border" />
+            <div className="my-1 border-t border-border/40 dark:border-border" />
             <Button variant="ghost"
               onClick={() => { setFileToDelete(ctxMenu.file.key); closeCtxMenu(); }}
               className="h-auto p-0 justify-start w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
@@ -1146,7 +1148,7 @@ export function FileManager({ ak, sk, bucket, isActive, onBack, refreshTrigger, 
       {selectedFile && (
           <aside aria-label="文件详情" className="flex min-h-0 w-80 shrink-0 flex-col border-l border-border bg-background text-foreground">
             {/* Header */}
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-zinc-100 dark:border-border shrink-0">
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-border/40 dark:border-border shrink-0">
               <div className="shrink-0">{getFileIcon(selectedFile.mimeType)}</div>
               <Tooltip content={selectedFile.key}>
                 <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">

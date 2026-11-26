@@ -7,6 +7,7 @@ import { SortField, formatRegion } from "./constants";
 import { RegionFilterSelect, SearchInput } from "./Toolbar";
 import { Plus, RefreshCw } from "lucide-react";
 import { Button } from "../../components/ui/button";
+import { PageToolbar } from "../../components/PageToolbar";
 import { LoadingOverlay } from "../../components/LoadingOverlay";
 import { BucketTable } from "./BucketTable";
 import { CreateBucketDialog } from "./CreateBucketDialog";
@@ -146,7 +147,7 @@ export function BucketList({
   return (
     <div className="flex-1 flex flex-col min-h-0 relative h-full">
       {!loading && !error && (
-        <div className="flex h-12 items-center gap-2 px-6 border-b border-zinc-200 dark:border-border shrink-0">
+        <PageToolbar>
           <Button onClick={() => setShowCreateDialog(true)}>
             <Plus /> 新建空间
           </Button>
@@ -181,7 +182,7 @@ export function BucketList({
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
           />
-        </div>
+        </PageToolbar>
       )}
 
       <div className="relative flex min-h-0 flex-1 flex-col">

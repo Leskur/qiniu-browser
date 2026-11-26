@@ -11,6 +11,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
 import { Tooltip } from "../components/ui/tooltip";
 import { PageState } from "../components/PageState";
+import { PageToolbar } from "../components/PageToolbar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 
 type Action = "online" | "offline" | "delete";
@@ -55,8 +56,8 @@ function formatTime(value?: string | number) {
 function FilterSelect({ label, value, items, onChange }: { label: string; value: string; items: { value: string; label: string }[]; onChange: (value: string) => void }) {
   return (
     <Select items={items} value={value} onValueChange={v => { if (v !== null) onChange(v); }}>
-      <SelectTrigger aria-label={label} className="w-32">
-        <Filter className="size-3.5 text-muted-foreground" />
+      <SelectTrigger aria-label={label} className="w-36 shrink-0">
+        <Filter className="size-4 text-muted-foreground" />
         <SelectValue />
       </SelectTrigger>
       <SelectContent align="end" alignItemWithTrigger={false} className="!w-auto min-w-32">
@@ -227,7 +228,7 @@ export function DomainManager({ ak, sk, isActive, selectedDomain, onSelectDomain
 
   return (
     <div className="@container/domain-page flex h-full min-w-0 flex-col overflow-hidden bg-background text-foreground">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+      <PageToolbar>
         <Button
           variant="ghost"
           disabled={loading}
@@ -238,13 +239,13 @@ export function DomainManager({ ak, sk, isActive, selectedDomain, onSelectDomain
           刷新
         </Button>
         {!loading && !listError && domains.length > 0 && (
-          <span className="text-xs tabular-nums text-zinc-400 dark:text-muted-foreground">{countLabel}</span>
+          <span className="min-w-0 truncate text-xs tabular-nums text-muted-foreground">{countLabel}</span>
         )}
         <div className="flex-1" />
         <FilterSelect label="域名状态" value={statusFilter} items={statusItems} onChange={setStatusFilter} />
         <FilterSelect label="加速区域" value={regionFilter} items={regionItems} onChange={setRegionFilter} />
-        <div className="relative w-40 @3xl/domain-page:w-56">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <div className="relative w-56 shrink-0">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             aria-label="搜索域名或 CNAME"
             placeholder="搜索域名或 CNAME..."
@@ -253,7 +254,7 @@ export function DomainManager({ ak, sk, isActive, selectedDomain, onSelectDomain
             className="pl-8"
           />
         </div>
-      </div>
+      </PageToolbar>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
       <div className="@container/domain-list relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -269,8 +270,8 @@ export function DomainManager({ ak, sk, isActive, selectedDomain, onSelectDomain
             description={isFiltered ? undefined : "在七牛控制台添加域名后即可在此管理"} />
         ) : (
           <div className="min-h-0 flex-1 overflow-auto">
-            <Table className="w-full table-fixed text-left text-sm">
-              <TableHeader className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50/80 backdrop-blur-md dark:border-border dark:bg-card/90">
+            <Table containerClassName="contents" className="w-full table-fixed text-left text-sm">
+              <TableHeader className="sticky top-0 z-10 border-b border-border bg-zinc-50 dark:bg-card">
                 <TableRow>
                   {sortableColumns.map(({ field, label }) => (
                     <TableHead key={field} className={`p-0 ${field === "geoCover" ? "hidden w-24 @2xl/domain-list:table-cell" : field === "name" ? "" : "w-20"}`}
@@ -283,7 +284,7 @@ export function DomainManager({ ak, sk, isActive, selectedDomain, onSelectDomain
                   <TableHead className="hidden px-3 py-3 text-left text-xs font-medium text-muted-foreground @3xl/domain-list:table-cell">CNAME</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody className="divide-y divide-zinc-100 dark:divide-border/80">
+              <TableBody className="divide-y divide-border/40 dark:divide-border/80">
                 {visibleDomains.map(domain => (
                   <TableRow
                     key={domain.name}

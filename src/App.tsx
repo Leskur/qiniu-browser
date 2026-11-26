@@ -39,7 +39,7 @@ const SIDEBAR_EXPANDED_WIDTH = 230;
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [credentials, setCredentials] = useState({ ak: "", sk: "", description: "" });
-  
+
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<Section>("storage");
   const [cdnSubSection, setCdnSubSection] = useState<CdnSubSection>("domains");
@@ -61,7 +61,7 @@ function App() {
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const updateInstallInFlight = useRef(false);
   const updateCheckInFlight = useRef(false);
-  
+
   useEffect(() => {
     const preventTabNavigation = (event: KeyboardEvent) => {
       if (event.key !== "Tab") return;
@@ -158,7 +158,7 @@ function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isAuthenticated && e.key === 'F5') {
         e.preventDefault();
-        
+
         if (activeSection === 'storage') {
           if (selectedBucket) {
             // 在文件管理页面，触发文件列表刷新
@@ -224,7 +224,7 @@ function App() {
   ];
 
   return (
-    <main 
+    <main
       className="flex h-screen flex-col overflow-hidden bg-sidebar text-foreground font-sans selection:bg-zinc-200 dark:selection:bg-accent"
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -236,7 +236,7 @@ function App() {
         <div className="flex min-h-0 flex-1 overflow-hidden bg-sidebar">
 
           {/* ── Sidebar ── */}
-          <aside 
+          <aside
             className="shrink-0 flex flex-col overflow-x-hidden bg-sidebar relative transition-[width] duration-200 ease-out"
             style={{ width: `${sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH}px` }}
             onTransitionEnd={handleSidebarTransitionEnd}
@@ -353,7 +353,7 @@ function App() {
           </aside>
 
           {/* ── Main ── */}
-          <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative rounded-tl-xl bg-white dark:bg-background">
+          <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative rounded-tl-xl bg-white shadow-[-2px_0_10px_rgb(0_0_0/0.01)] dark:bg-background dark:shadow-[-2px_0_10px_rgb(0_0_0/0.10)]">
             {/* Content — always mounted, visibility toggled to preserve state */}
             <div className="flex-1 overflow-hidden relative z-10">
               <div className={`h-full relative flex flex-col ${activeSection === "storage" ? "" : "hidden"}`}>
@@ -405,8 +405,8 @@ function App() {
                 {/* CDN Content */}
                 <div className="flex-1 overflow-hidden">
                   <div className={`h-full ${cdnSubSection === "refresh" ? "" : "hidden"}`}>
-                    <CdnManager 
-                      ak={credentials.ak} 
+                    <CdnManager
+                      ak={credentials.ak}
                       sk={credentials.sk}
                       prefillDomain={prefillDomain}
                       onPrefillUsed={() => setPrefillDomain("")}
@@ -414,8 +414,8 @@ function App() {
                     />
                   </div>
                   <div className={`h-full ${cdnSubSection === "domains" ? "" : "hidden"}`}>
-                    <DomainManager 
-                      ak={credentials.ak} 
+                    <DomainManager
+                      ak={credentials.ak}
                       sk={credentials.sk}
                       selectedDomain={selectedDomain}
                       isActive={activeSection === "cdn" && cdnSubSection === "domains"}
@@ -469,7 +469,7 @@ function App() {
           </DialogContent>
         </Dialog>
       )}
-      
+
       {/* Transfer Panel - Global */}
       {isAuthenticated && <TransferPanel />}
     </main>

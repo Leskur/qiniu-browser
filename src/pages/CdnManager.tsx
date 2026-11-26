@@ -283,7 +283,7 @@ export function CdnManager({
 
   return (
     <div className="h-full flex flex-col bg-white dark:bg-background">
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className={`min-h-0 flex-1 p-6 ${subTab === "history" ? "overflow-hidden" : "overflow-y-auto"}`}>
         <Tabs
           value={subTab}
           onValueChange={(value) => {
@@ -293,20 +293,20 @@ export function CdnManager({
               setUrlError("");
             }
           }}
-          className="max-w-4xl mx-auto gap-6"
+          className={`max-w-4xl mx-auto gap-6 ${subTab === "history" ? "h-full min-h-0" : ""}`}
         >
           {/* Tabs */}
-          <TabsList aria-label="刷新预取">
+          <TabsList aria-label="刷新预取" className="shrink-0">
             <TabsTrigger value="refresh" disabled={loading}>缓存刷新</TabsTrigger>
             <TabsTrigger value="prefetch" disabled={loading}>文件预取</TabsTrigger>
             <TabsTrigger value="history" disabled={loading}>操作记录</TabsTrigger>
           </TabsList>
 
-          <TabsContent value={subTab}>
+          <TabsContent value={subTab} className={subTab === "history" ? "min-h-0" : undefined}>
           {subTab === "history" ? (
             /* Task History */
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="flex h-full min-h-0 flex-col gap-4">
+              <div className="flex shrink-0 items-center justify-between">
                 <h3 className="text-sm font-semibold text-zinc-700 dark:text-foreground">
                   操作记录
                   {!loadingTasks && !tasksError && total > 0 && (
@@ -315,7 +315,7 @@ export function CdnManager({
                 </h3>
               </div>
 
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-3">
                 <div className="flex items-center gap-2">
                   <Label htmlFor="record-operation" className="shrink-0 text-xs font-normal text-muted-foreground">操作类型</Label>
                   <Select
@@ -364,7 +364,7 @@ export function CdnManager({
               </div>
 
               {queryRequestId && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 text-xs text-amber-800 dark:text-amber-200">
+                <div className="flex shrink-0 items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 text-xs text-amber-800 dark:text-amber-200">
                   <span className="truncate flex-1">
                     已按 RequestID 筛选：
                     <code className="ml-1 font-mono">{queryRequestId}</code>
@@ -403,9 +403,9 @@ export function CdnManager({
                   )}
                 </PageState>
               ) : (
-                <div className="overflow-hidden">
-                  <Table className="w-full">
-                    <TableHeader className="border-b border-border bg-muted/40">
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <Table containerClassName="contents" className="w-full">
+                    <TableHeader className="sticky top-0 z-10 border-b border-border bg-zinc-50 dark:bg-card">
                       <TableRow>
                         <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-muted-foreground">URL</TableHead>
                         <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-muted-foreground whitespace-nowrap w-28">刷新类型</TableHead>
@@ -414,7 +414,7 @@ export function CdnManager({
                         <TableHead className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-muted-foreground whitespace-nowrap w-32">耗时</TableHead>
                       </TableRow>
                     </TableHeader>
-                    <TableBody className="divide-y divide-zinc-100 dark:divide-border">
+                    <TableBody className="divide-y divide-border/40 dark:divide-border">
                       {tasks.map((task, index) => {
                         const rowKey = task.taskId || task.id || `${task.url}-${task.createAt}-${index}`;
                         // Use the server's operation type; a trailing slash can also be a file URL.
@@ -452,7 +452,7 @@ export function CdnManager({
               )}
 
               {total > 0 && (
-                <div className="flex items-center justify-between gap-4 pt-1">
+                <div className="flex shrink-0 items-center justify-between gap-4 pt-1">
                   <span className="text-xs text-zinc-400 shrink-0">
                     共 {total} 条 · 每页 {TASK_PAGE_SIZE} 条
                   </span>
