@@ -1,9 +1,15 @@
 use std::fs;
-use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
 use log::info;
 use tauri::{AppHandle, Emitter};
+use tempfile::NamedTempFile;
+use tokio::io::AsyncWriteExt;
+
+const DOWNLOAD_WRITE_BUFFER: usize = 64 * 1024;
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(serde::Serialize, Clone)]
 struct DownloadProgressEvent {
@@ -13,7 +19,7 @@ struct DownloadProgressEvent {
     total_size: u64,
     downloaded_size: u64,
     progress: f64,
-    status: String, // "downloading", "completed", "failed"
+    status: String,
     error: Option<String>,
 }
 
@@ -23,9 +29,23 @@ pub(crate) struct DownloadResult {
     failed: Vec<String>,
 }
 
+#[derive(Clone, Copy)]
+enum ExistingFilePolicy {
+    Overwrite,
+    Reject,
+}
+
+#[derive(Clone, Copy, Default)]
+struct DownloadStats {
+    total_size: u64,
+    downloaded_size: u64,
+}
+
 fn batch_download_path(root: &Path, name: &str) -> Result<PathBuf, String> {
     // Object keys use forward slashes. Reject platform-specific separators and prefixes.
-    if name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+    if name
+        .split('/')
+        .any(|part| part.is_empty() || part == "." || part == "..")
         || name.contains(['\\', ':'])
     {
         return Err("无效的下载相对路径".into());
@@ -56,51 +76,140 @@ fn batch_download_path(root: &Path, name: &str) -> Result<PathBuf, String> {
     Err("无效的下载相对路径".into())
 }
 
-fn write_new_download(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(path)?;
-    let result = file.write_all(bytes);
-    drop(file);
-    if result.is_err() {
-        let _ = fs::remove_file(path);
-    }
-    result
-}
-
-#[cfg(test)]
-mod batch_download_tests {
-    use super::*;
-
-    #[test]
-    fn download_rejects_paths_outside_the_destination() {
-        let root = std::env::temp_dir();
-        for name in ["../outside.txt", "/absolute.txt", "nested/../other.txt", "nested\\other.txt", "file.txt:stream"] {
-            assert!(batch_download_path(&root, name).is_err(), "{name}");
+fn prepare_download(
+    path: &Path,
+    policy: ExistingFilePolicy,
+) -> std::io::Result<(NamedTempFile, fs::File)> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    if matches!(policy, ExistingFilePolicy::Reject) {
+        match fs::symlink_metadata(path) {
+            Ok(_) => return Err(std::io::ErrorKind::AlreadyExists.into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
     }
+    let temporary = tempfile::Builder::new()
+        .prefix(".qiniu-download-")
+        .suffix(".part")
+        .tempfile_in(parent)?;
+    let writer = temporary.as_file().try_clone()?;
+    Ok((temporary, writer))
+}
 
-    #[test]
-    fn download_creates_nested_files_without_overwriting() {
-        let dir = std::env::temp_dir().join(format!("qiniu-download-test-{}", uuid::Uuid::new_v4()));
-        fs::create_dir(&dir).unwrap();
-        let root = fs::canonicalize(&dir).unwrap();
-        let path = batch_download_path(&root, "folder/file.txt").unwrap();
-        assert_eq!(path, root.join("folder").join("file.txt"));
-        write_new_download(&path, b"original").unwrap();
-        assert_eq!(
-            write_new_download(&path, b"replacement").unwrap_err().kind(),
-            std::io::ErrorKind::AlreadyExists
-        );
-        assert_eq!(fs::read(&path).unwrap(), b"original");
-        fs::remove_file(path).unwrap();
-        fs::remove_dir(root.join("folder")).unwrap();
-        fs::remove_dir(root).unwrap();
+fn file_error(error: &std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::AlreadyExists {
+        "目标文件已存在，未覆盖".into()
+    } else {
+        error.to_string()
     }
+}
+
+/// Writes each HTTP chunk to a bounded file buffer. Only a complete response is published.
+async fn download_to_path(
+    client: &reqwest::Client,
+    url: &str,
+    path: &Path,
+    policy: ExistingFilePolicy,
+    mut on_progress: impl FnMut(DownloadStats),
+) -> Result<DownloadStats, String> {
+    let mut response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+    let expected_size = response.content_length();
+    let mut stats = DownloadStats {
+        total_size: expected_size.unwrap_or(0),
+        downloaded_size: 0,
+    };
+    on_progress(stats);
+
+    let target = path.to_path_buf();
+    let (temporary, writer) =
+        tauri::async_runtime::spawn_blocking(move || prepare_download(&target, policy))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| file_error(&error))?;
+    let mut writer = tokio::fs::File::from_std(writer);
+    writer.set_max_buf_size(DOWNLOAD_WRITE_BUFFER);
+
+    let transferred = async {
+        while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+            writer
+                .write_all(&chunk)
+                .await
+                .map_err(|error| error.to_string())?;
+            stats.downloaded_size += chunk.len() as u64;
+            on_progress(stats);
+        }
+        writer.flush().await.map_err(|error| error.to_string())?;
+        if expected_size.is_some_and(|expected| expected != stats.downloaded_size) {
+            return Err("下载未完成：文件大小与响应声明不一致".into());
+        }
+        Ok::<_, String>(())
+    }
+    .await;
+
+    // Finish in-flight disk I/O and close the cloned handle before cleanup or publication.
+    drop(writer.into_std().await);
+    transferred?;
+
+    let target = path.to_path_buf();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = match policy {
+            ExistingFilePolicy::Overwrite => temporary.persist(&target),
+            ExistingFilePolicy::Reject => temporary.persist_noclobber(&target),
+        };
+        // On failure PersistError still owns the temporary file, so dropping it removes it.
+        result.map(|_| ()).map_err(|error| file_error(&error.error))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(stats)
+}
+
+fn emit_progress(
+    app: &AppHandle,
+    task_id: &str,
+    filename: &str,
+    url: &str,
+    stats: DownloadStats,
+    status: &str,
+    error: Option<String>,
+) {
+    let progress = if status == "completed" {
+        100.0
+    } else if stats.total_size > 0 {
+        (stats.downloaded_size as f64 / stats.total_size as f64 * 100.0).min(100.0)
+    } else {
+        0.0
+    };
+    let _ = app.emit(
+        "download-progress",
+        DownloadProgressEvent {
+            task_id: task_id.into(),
+            file_name: filename.into(),
+            url: url.into(),
+            total_size: stats.total_size,
+            downloaded_size: stats.downloaded_size,
+            progress,
+            status: status.into(),
+            error,
+        },
+    );
 }
 
 #[tauri::command]
 pub(crate) async fn download_files_to_dir(
     app: AppHandle,
-    items: Vec<(String, String)>, // (url, filename)
+    items: Vec<(String, String)>,
     dir: String,
     task_ids: Vec<String>,
 ) -> Result<DownloadResult, String> {
@@ -108,7 +217,6 @@ pub(crate) async fn download_files_to_dir(
         return Err("下载文件与任务数量不一致".into());
     }
     info!("批量下载开始: dir={}, files={}", dir, items.len());
-    use std::sync::Arc;
     let dir_path = fs::canonicalize(dir).map_err(|error| error.to_string())?;
     if !dir_path.is_dir() {
         return Err("所选下载位置不是文件夹".into());
@@ -118,127 +226,79 @@ pub(crate) async fn download_files_to_dir(
     let downloaded = Arc::new(Mutex::new(Vec::<String>::new()));
     let failed = Arc::new(Mutex::new(Vec::<String>::new()));
 
-    let handles: Vec<_> = items.into_iter().zip(task_ids).map(|((url, filename), task_id)| {
-        let root = dir_path.clone();
-        let client = client.clone();
-        let concurrency = Arc::clone(&concurrency);
-        let dl = Arc::clone(&downloaded);
-        let fl = Arc::clone(&failed);
-        let app_clone = app.clone();
-
-        tokio::spawn(async move {
-            let _permit = concurrency.acquire().await.expect("download semaphore stays open");
-            // Emit start event
-            let _ = app_clone.emit("download-progress", DownloadProgressEvent {
-                task_id: task_id.clone(),
-                file_name: filename.clone(),
-                url: url.clone(),
-                total_size: 0,
-                downloaded_size: 0,
-                progress: 0.0,
-                status: "downloading".to_string(),
-                error: None,
-            });
-
-            match client.get(&url).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    let total_size = resp.content_length().unwrap_or(0);
-                    match resp.bytes().await {
-                        Ok(bytes) => {
-                            let downloaded_size = bytes.len() as u64;
-
-                            // Create parent directories if they don't exist
-                            let saved = tauri::async_runtime::spawn_blocking({
-                                let filename = filename.clone();
-                                move || {
-                                    let path = batch_download_path(&root, &filename)?;
-                                    write_new_download(&path, &bytes).map_err(|error| {
-                                        if error.kind() == std::io::ErrorKind::AlreadyExists {
-                                            "目标文件已存在，未覆盖".into()
-                                        } else {
-                                            error.to_string()
-                                        }
-                                    })
-                                }
-                            }).await.unwrap_or_else(|error| Err(error.to_string()));
-                            match saved {
-                                Ok(_) => {
-                                    dl.lock().unwrap().push(filename.clone());
-                                    // Emit success event
-                                    let _ = app_clone.emit("download-progress", DownloadProgressEvent {
-                                        task_id,
-                                        file_name: filename,
-                                        url,
-                                        total_size,
-                                        downloaded_size,
-                                        progress: 100.0,
-                                        status: "completed".to_string(),
-                                        error: None,
-                                    });
-                                },
-                                Err(e) => {
-                                    let error_msg = format!("{}: {}", filename, e);
-                                    fl.lock().unwrap().push(error_msg.clone());
-                                    let _ = app_clone.emit("download-progress", DownloadProgressEvent {
-                                        task_id,
-                                        file_name: filename,
-                                        url,
-                                        total_size,
-                                        downloaded_size: 0,
-                                        progress: 0.0,
-                                        status: "failed".to_string(),
-                                        error: Some(error_msg),
-                                    });
-                                },
+    let handles: Vec<_> = items
+        .into_iter()
+        .zip(task_ids)
+        .map(|((url, filename), task_id)| {
+            let root = dir_path.clone();
+            let client = client.clone();
+            let concurrency = Arc::clone(&concurrency);
+            let downloaded = Arc::clone(&downloaded);
+            let failed = Arc::clone(&failed);
+            let app = app.clone();
+            tokio::spawn(async move {
+                let _permit = concurrency
+                    .acquire()
+                    .await
+                    .expect("download semaphore stays open");
+                let mut stats = DownloadStats::default();
+                emit_progress(&app, &task_id, &filename, &url, stats, "downloading", None);
+                let mut last_progress = Instant::now();
+                let result = async {
+                    let name = filename.clone();
+                    let path = tauri::async_runtime::spawn_blocking(move || {
+                        batch_download_path(&root, &name)
+                    })
+                    .await
+                    .map_err(|error| error.to_string())??;
+                    download_to_path(
+                        &client,
+                        &url,
+                        &path,
+                        ExistingFilePolicy::Reject,
+                        |current| {
+                            stats = current;
+                            if current.downloaded_size == 0
+                                || last_progress.elapsed() >= PROGRESS_INTERVAL
+                            {
+                                emit_progress(
+                                    &app,
+                                    &task_id,
+                                    &filename,
+                                    &url,
+                                    current,
+                                    "downloading",
+                                    None,
+                                );
+                                last_progress = Instant::now();
                             }
                         },
-                        Err(e) => {
-                            let error_msg = format!("{}: {}", filename, e);
-                            fl.lock().unwrap().push(error_msg.clone());
-                            let _ = app_clone.emit("download-progress", DownloadProgressEvent {
-                                task_id,
-                                file_name: filename,
-                                url,
-                                total_size,
-                                downloaded_size: 0,
-                                progress: 0.0,
-                                status: "failed".to_string(),
-                                error: Some(error_msg),
-                            });
-                        },
+                    )
+                    .await
+                }
+                .await;
+                match result {
+                    Ok(stats) => {
+                        downloaded.lock().unwrap().push(filename.clone());
+                        emit_progress(&app, &task_id, &filename, &url, stats, "completed", None);
+                    }
+                    Err(error) => {
+                        let message = format!("{}: {}", filename, error);
+                        failed.lock().unwrap().push(message.clone());
+                        emit_progress(
+                            &app,
+                            &task_id,
+                            &filename,
+                            &url,
+                            stats,
+                            "failed",
+                            Some(message),
+                        );
                     }
                 }
-                Ok(resp) => {
-                    let error_msg = format!("{}: HTTP {}", filename, resp.status());
-                    fl.lock().unwrap().push(error_msg.clone());
-                    let _ = app_clone.emit("download-progress", DownloadProgressEvent {
-                        task_id,
-                        file_name: filename,
-                        url,
-                        total_size: 0,
-                        downloaded_size: 0,
-                        progress: 0.0,
-                        status: "failed".to_string(),
-                        error: Some(error_msg),
-                    });
-                },
-                Err(e) => {
-                    let error_msg = format!("{}: {}", filename, e);
-                    fl.lock().unwrap().push(error_msg.clone());
-                    let _ = app_clone.emit("download-progress", DownloadProgressEvent {
-                        task_id,
-                        file_name: filename,
-                        url,
-                        total_size: 0,
-                        downloaded_size: 0,
-                        progress: 0.0,
-                        status: "failed".to_string(),
-                        error: Some(error_msg),
-                    });
-                },
-            }
+            })
         })
-    }).collect();
+        .collect();
 
     let mut join_error = None;
     for handle in handles {
@@ -249,7 +309,6 @@ pub(crate) async fn download_files_to_dir(
     if let Some(error) = join_error {
         return Err(format!("下载任务异常: {error}"));
     }
-
     Ok(DownloadResult {
         downloaded: Arc::try_unwrap(downloaded).unwrap().into_inner().unwrap(),
         failed: Arc::try_unwrap(failed).unwrap().into_inner().unwrap(),
@@ -258,15 +317,17 @@ pub(crate) async fn download_files_to_dir(
 
 #[tauri::command]
 pub(crate) async fn download_file(url: String, save_path: String) -> Result<(), String> {
-    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("下载失败: HTTP {}", response.status()));
-    }
-    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-    let path = PathBuf::from(&save_path);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    fs::write(&path, &bytes).map_err(|e| e.to_string())?;
-    Ok(())
+    download_to_path(
+        &reqwest::Client::new(),
+        &url,
+        Path::new(&save_path),
+        ExistingFilePolicy::Overwrite,
+        |_| {},
+    )
+    .await
+    .map(|_| ())
+    .map_err(|error| format!("下载失败: {error}"))
 }
+
+#[cfg(test)]
+mod tests;
